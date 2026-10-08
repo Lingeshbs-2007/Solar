@@ -59,17 +59,22 @@ export const SolarMonitorView: React.FC<SolarMonitorViewProps> = ({ forecast }) 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Solar Monitor
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+              Solar Performance Simulation
+            </h1>
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+              Simulation — No Inverter Connection
+            </span>
+          </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            What happened today? Comparing expected forecast against inverter output.
+            Expected vs. simulated solar output benchmarked against your array rating ({forecast.panelCapacityKW} kW).
           </p>
         </div>
 
         {/* Demo Telemetry Simulator Switcher */}
         <div className="flex items-center gap-2 bg-white border border-slate-200/80 rounded-xl p-1 text-xs">
-          <span className="text-[11px] font-semibold text-slate-500 px-2">Feed Scenario:</span>
+          <span className="text-[11px] font-semibold text-slate-500 px-2">Simulation Scenario:</span>
           <button
             type="button"
             onClick={() => setCondition('cloudy_dip')}
@@ -100,7 +105,7 @@ export const SolarMonitorView: React.FC<SolarMonitorViewProps> = ({ forecast }) 
         <span className="flex items-center gap-2">
           <Info className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
-            <strong>Simulated Inverter Feed:</strong> Displaying realistic telemetry telemetry points benchmarked against your array capacity ({forecast.panelCapacityKW} kW).
+            <strong>Demonstration Simulation:</strong> Compares modeled solar irradiance against simulated inverter behavior (e.g., transient cloud absorption). No physical IoT sensor required for hackathon validation.
           </span>
         </span>
       </div>
@@ -110,7 +115,7 @@ export const SolarMonitorView: React.FC<SolarMonitorViewProps> = ({ forecast }) 
         {/* Expected */}
         <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-1">
-            Expected Generation
+            Forecasted Output
           </span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-3xl font-extrabold text-slate-900 font-mono">
@@ -126,7 +131,7 @@ export const SolarMonitorView: React.FC<SolarMonitorViewProps> = ({ forecast }) 
         {/* Actual */}
         <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-1">
-            Actual Generation
+            Simulated Actual Output
           </span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-3xl font-extrabold text-emerald-700 font-mono">
@@ -135,7 +140,7 @@ export const SolarMonitorView: React.FC<SolarMonitorViewProps> = ({ forecast }) 
             <span className="text-xs text-slate-500 font-semibold">kWh</span>
           </div>
           <span className="text-[11px] text-slate-500 mt-2 block">
-            Inverter recorded yield
+            Simulated inverter recorded yield
           </span>
         </div>
 

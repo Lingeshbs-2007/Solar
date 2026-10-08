@@ -113,7 +113,7 @@ ${JSON.stringify(decisions, null, 2)}
             actionableGuidance: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: '2-3 practical steps for the household (e.g., programming delay timer on washing machine, avoiding inverter overload).',
+              description: '2-3 practical steps for the household (e.g., programming delay timer on washing machine, running during recommended solar window).',
             },
             confidenceAssessment: {
               type: Type.STRING,

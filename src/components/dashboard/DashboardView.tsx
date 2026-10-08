@@ -10,21 +10,34 @@ import {
   CheckCircle2,
   ArrowRight,
   Sparkles,
-  Info,
+  AlertCircle,
+  RefreshCw,
+  Search,
+  Cpu,
+  BarChart3,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 interface DashboardViewProps {
   impact: ImpactSummary;
   forecast: SolarForecastResult;
+  isPlanStale: boolean;
+  isGeneratingPlan: boolean;
+  generationStage: string | null;
+  onGeneratePlan: () => void;
   onGoToOptimize: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   impact,
   forecast,
+  isPlanStale,
+  isGeneratingPlan,
+  generationStage,
+  onGeneratePlan,
   onGoToOptimize,
 }) => {
-  const [hoveredHour, setHoveredHour] = useState<number | null>(13);
+  const [hoveredHour, setHoveredHour] = useState<number | null>(forecast.peakGenerationHour);
 
   // Time greeting
   const hourNow = new Date().getHours();
@@ -37,6 +50,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     if (h === 12) return '12:00 PM';
     return `${h - 12}:00 PM`;
   };
+
+  // Total daily expected demand
+  const totalDailyDemandKWh = Number(
+    impact.optimizedHourly.reduce((sum, h) => sum + h.totalDemandKWh, 0).toFixed(1)
+  );
+
+  // Useful solar window string derived dynamically from forecast
+  const solarWindowStr = `${formatHour12(forecast.usefulSolarWindow.startHour)} – ${formatHour12(
+    forecast.usefulSolarWindow.endHour
+  )}`;
 
   // SVG Chart Dimensions
   const svgWidth = 820;
@@ -66,12 +89,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Header */}
+      {/* Stale Plan Alert Banner */}
+      {isPlanStale && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-amber-900">
+                Household or appliance inputs were modified
+              </h4>
+              <p className="text-[11px] text-amber-800/90">
+                The current plan does not reflect your latest parameters. Regenerate tomorrow&apos;s plan to update recommendations.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onGeneratePlan}
+            disabled={isGeneratingPlan}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-xs cursor-pointer self-start sm:self-auto shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
+            <span>{isGeneratingPlan ? generationStage || 'Calculating...' : 'Regenerate Plan'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Top Header & Primary Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-            {greeting}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+              {greeting}
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.2 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+              Simulation Mode
+            </span>
+          </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Tomorrow&apos;s Solar Plan
           </h1>
@@ -80,100 +136,96 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onGoToOptimize}
-          className="flex items-center gap-1.5 self-start sm:self-auto px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs cursor-pointer"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>View Detailed Timeline</span>
-          <ArrowRight className="w-3.5 h-3.5 ml-1" />
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={onGeneratePlan}
+            disabled={isGeneratingPlan}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs cursor-pointer"
+          >
+            <Sparkles className={`w-4 h-4 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
+            <span>{isGeneratingPlan ? generationStage || 'Generating Plan...' : 'Generate Tomorrow\'s Plan'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onGoToOptimize}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition-colors shadow-2xs cursor-pointer"
+          >
+            <span>Timeline</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* TOP KPI ROW: Four Compact Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
-        {/* Card 1: Expected Solar */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">Expected Solar</span>
-            <Sun className="w-4 h-4 text-amber-500" />
+      {/* Staged Progress Indicator while generating plan */}
+      {isGeneratingPlan && generationStage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-xs text-emerald-900 animate-in fade-in">
+          <div className="flex items-center gap-2 font-mono">
+            <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
+            <span>{generationStage}</span>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-              {forecast.totalSolarGenerationKWh}
+          <span className="text-[11px] text-emerald-700">Real-time optimization engine active</span>
+        </div>
+      )}
+
+      {/* Hero / Main Status Card: Tomorrow's Solar Opportunity */}
+      <div className="bg-gradient-to-r from-emerald-900 via-emerald-800 to-slate-900 rounded-2xl p-5 sm:p-6 text-white shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/50 pb-3">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 block">
+              Tomorrow&apos;s Solar Opportunity
             </span>
-            <span className="text-xs text-slate-500 font-semibold">kWh</span>
+            <div className="text-xl sm:text-2xl font-extrabold tracking-tight">
+              {forecast.totalSolarGenerationKWh} kWh Expected Generation
+            </div>
+            <p className="text-xs text-emerald-200/90 mt-0.5">
+              Strongest solar window: <strong className="text-white font-mono">{solarWindowStr}</strong> ({forecast.usefulSolarWindow.peakKW} kW peak output).
+            </p>
           </div>
-          <div className="mt-2 text-[11px] text-slate-500 font-medium truncate">
-            Confidence: <span className="font-semibold text-emerald-700 capitalize">{forecast.forecastConfidence}</span>
+          <div className="flex items-center gap-2 self-start sm:self-auto bg-white/10 px-3 py-1.5 rounded-xl text-xs font-mono backdrop-blur-xs">
+            <Sun className="w-4 h-4 text-amber-400 fill-amber-400" />
+            <span>Confidence: <strong className="capitalize text-emerald-200">{forecast.forecastConfidence}</strong></span>
           </div>
         </div>
 
-        {/* Card 2: Solar Self-Use */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">Solar Self-Use</span>
-            <Zap className="w-4 h-4 text-emerald-600" />
+        {/* 4 Primary KPIs in Hero */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 font-mono">
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur-xs">
+            <span className="text-[10px] uppercase text-emerald-200 font-sans block">1. Solar Generation</span>
+            <span className="text-2xl font-extrabold text-white">{forecast.totalSolarGenerationKWh}</span>
+            <span className="text-xs text-emerald-300 ml-1">kWh</span>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono tracking-tight">
-              {impact.optimizedSelfConsumptionPct}%
-            </span>
-            {impact.selfConsumptionGainPctPoints > 0 && (
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                +{impact.selfConsumptionGainPctPoints}%
-              </span>
-            )}
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500 font-medium">
-            Baseline normal was {impact.normalSelfConsumptionPct}%
-          </div>
-        </div>
 
-        {/* Card 3: Grid Import */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">Grid Import</span>
-            <ArrowDownToLine className="w-4 h-4 text-rose-500" />
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur-xs">
+            <span className="text-[10px] uppercase text-emerald-200 font-sans block">2. Household Demand</span>
+            <span className="text-2xl font-extrabold text-white">{totalDailyDemandKWh}</span>
+            <span className="text-xs text-emerald-300 ml-1">kWh</span>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-              {impact.optimizedGridImportKWh}
-            </span>
-            <span className="text-xs text-slate-500 font-semibold">kWh</span>
-          </div>
-          <div className="mt-2 text-[11px] text-emerald-700 font-semibold">
-            &darr; {impact.gridReductionKWh} kWh avoided
-          </div>
-        </div>
 
-        {/* Card 4: Solar Peak */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">Solar Peak</span>
-            <TrendingUp className="w-4 h-4 text-amber-500" />
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur-xs">
+            <span className="text-[10px] uppercase text-emerald-200 font-sans block">3. Grid Reduction</span>
+            <span className="text-2xl font-extrabold text-emerald-300">-{impact.gridReductionKWh}</span>
+            <span className="text-xs text-emerald-200 ml-1">kWh</span>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              {formatHour12(forecast.peakGenerationHour)}
-            </span>
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500 font-medium">
-            Peak output: <span className="font-mono text-slate-700 font-semibold">{forecast.peakGenerationKW} kW</span>
+
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur-xs">
+            <span className="text-[10px] uppercase text-emerald-200 font-sans block">4. Self-Consumption</span>
+            <span className="text-2xl font-extrabold text-amber-300">{impact.optimizedSelfConsumptionPct}%</span>
+            <span className="text-[10px] text-emerald-300 block font-sans">+{impact.selfConsumptionGainPctPoints}% gain</span>
           </div>
         </div>
       </div>
 
-      {/* MAIN CHART: SOLAR vs HOUSEHOLD DEMAND */}
+      {/* MAIN CHART: SOLAR vs HOUSEHOLD DEMAND with Mismatch Shading */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-              Solar vs. Household Demand
+              Solar vs. Household Demand Balance
             </h2>
             <p className="text-xs text-slate-500">
-              Yellow indicates available rooftop solar. Charcoal indicates household demand under the optimized schedule.
+              Gold line: Predicted solar generation. Charcoal line: Household demand. Shaded zones show clean surplus opportunity vs grid import deficit.
             </p>
           </div>
 
@@ -188,13 +240,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 bg-emerald-500/20 border border-emerald-500/40 rounded-xs" />
-              <span className="text-emerald-700">Surplus</span>
+              <span className="text-emerald-700">Surplus Window</span>
             </div>
           </div>
         </div>
 
         {/* SVG Canvas */}
-        <div className="relative w-full overflow-x-auto">
+        <div className="w-full overflow-x-auto">
           <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-auto min-w-[620px] select-none">
             {/* Grid Lines */}
             {[0, 0.33, 0.66, 1.0].map((frac) => {
@@ -234,7 +286,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               const isSurplus = sol > dem;
               const diffKWh = Math.abs(sol - dem);
               const diffHeight = (diffKWh / maxY) * graphHeight;
-
               const yTop = getY(Math.max(sol, dem));
 
               return (
@@ -243,7 +294,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   onMouseEnter={() => setHoveredHour(pt.hour)}
                   className="cursor-pointer"
                 >
-                  {/* Subtle column hover background */}
                   <rect
                     x={getX(pt.hour) - graphWidth / 48}
                     y={padding.top}
@@ -252,8 +302,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     fill={hoveredHour === pt.hour ? '#f8fafc' : 'transparent'}
                   />
 
-                  {/* Shaded zone between curves */}
-                  {diffKWh > 0.1 && (
+                  {diffKWh > 0.08 && (
                     <rect
                       x={x}
                       y={yTop}
@@ -360,7 +409,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="font-bold text-rose-600">{activeDemandPt.gridImportKWh.toFixed(2)} kWh</span>
             </div>
             <div>
-              <span className="text-slate-500 font-sans text-[11px] block">Net Status</span>
+              <span className="text-slate-500 font-sans text-[11px] block">Status</span>
               <span
                 className={`text-[10px] px-2 py-0.5 rounded-full font-sans font-bold ${
                   activeDemandPt.classification === 'SURPLUS'
@@ -377,7 +426,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </div>
 
-      {/* NEXT SECTION: Tomorrow's Recommended Schedule (Compact Rows) */}
+      {/* HOW IT WORKS SECTION (Compact 4-Step Pipeline Summary) */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          How SolarFlow Optimization Works
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 space-y-1">
+            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center text-[10px]">1</span>
+              Forecast
+            </span>
+            <p className="text-[11px] text-slate-600">
+              We query solar radiation & estimate tomorrow&apos;s rooftop generation with confidence bands.
+            </p>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 space-y-1">
+            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-600 flex items-center justify-center text-[10px]">2</span>
+              Analyze
+            </span>
+            <p className="text-[11px] text-slate-600">
+              We compare solar availability with household demand to find clean surplus opportunity windows.
+            </p>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 space-y-1">
+            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-[10px]">3</span>
+              Optimize
+            </span>
+            <p className="text-[11px] text-slate-600">
+              Our greedy optimizer places flexible loads into solar hours respecting duration, comfort, and occupancy.
+            </p>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 space-y-1">
+            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-purple-500/10 text-purple-600 flex items-center justify-center text-[10px]">4</span>
+              Measure
+            </span>
+            <p className="text-[11px] text-slate-600">
+              We compare normal vs. optimized schedules to calculate self-consumption and grid reduction.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* TOMORROW'S RECOMMENDED SCHEDULE (Compact Rows) */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
           <div>
@@ -385,11 +482,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Tomorrow&apos;s Recommended Schedule
             </h2>
             <p className="text-xs text-slate-500">
-              Shifted flexible appliances to maximize midday rooftop solar capture.
+              Actionable appliance operating slots based on forecast solar surplus.
             </p>
           </div>
           <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 font-mono">
-            {impact.shiftedAppliancesCount} recommended shift{impact.shiftedAppliancesCount !== 1 ? 's' : ''}
+            {impact.shiftedAppliancesCount} of {impact.totalAppliancesCount} recommended shift{impact.shiftedAppliancesCount !== 1 ? 's' : ''}
           </span>
         </div>
 
@@ -420,13 +517,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1.5 mt-0.5">
                       <span>{decision.powerKW} kW</span>
                       <span>&bull;</span>
-                      <span>{decision.durationHours} hr run</span>
+                      <span>{decision.durationHours} hr runtime</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4 sm:justify-end">
-                  {decision.changed ? (
+                  {decision.status === 'shifted' ? (
                     <>
                       <div className="font-mono text-xs flex items-center gap-1.5">
                         <span className="text-slate-400 line-through">{normal12}</span>
@@ -442,16 +539,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         Recommended
                       </span>
                     </>
+                  ) : decision.status === 'no-feasible-schedule' ? (
+                    <>
+                      <div className="font-mono text-xs text-slate-600">
+                        <span>{normal12}</span>
+                      </div>
+                      <span className="text-amber-700 font-medium text-[11px]">
+                        No feasible window
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                        Constrained
+                      </span>
+                    </>
                   ) : (
                     <>
                       <div className="font-mono text-xs text-slate-600">
                         <span>{normal12}</span>
                       </div>
-                      <span className="text-slate-400 font-medium">
+                      <span className="text-slate-500 font-medium">
                         No change needed
                       </span>
                       <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                        Optimal
+                        {decision.status === 'fixed' ? 'Fixed' : 'Optimal'}
                       </span>
                     </>
                   )}
@@ -462,14 +571,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* BOTTOM: Normal vs Optimized Compact Visual Comparison */}
+      {/* BEFORE VS AFTER: Compact Visual Comparison Cards */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
-        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-          Normal vs. Optimized Impact Comparison
-        </h2>
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+            Before vs. After Impact Comparison
+          </h2>
+          <span className="text-xs text-slate-500">Same simulation day comparison</span>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-          {/* Metric A: Solar Self-Consumption */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Card A: Solar Self-Consumption */}
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/70 space-y-2">
             <div className="flex justify-between items-center text-xs font-semibold text-slate-700">
               <span>Solar Self-Consumption</span>
@@ -480,7 +592,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div className="space-y-1.5 text-xs font-mono">
               <div className="flex justify-between text-slate-500">
-                <span>Normal:</span>
+                <span>Before (Normal):</span>
                 <span>{impact.normalSelfConsumptionPct}%</span>
               </div>
               <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -491,7 +603,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
               <div className="flex justify-between text-emerald-700 font-bold pt-1">
-                <span>Optimized:</span>
+                <span>After (Optimized):</span>
                 <span>{impact.optimizedSelfConsumptionPct}%</span>
               </div>
               <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -503,10 +615,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          {/* Metric B: Grid Import */}
+          {/* Card B: Grid Energy Import */}
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/70 space-y-2">
             <div className="flex justify-between items-center text-xs font-semibold text-slate-700">
-              <span>Grid Energy Import</span>
+              <span>Grid Electricity Import</span>
               <span className="text-emerald-700 font-bold font-mono">
                 -{impact.gridReductionKWh} kWh avoided
               </span>
@@ -514,7 +626,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div className="space-y-1.5 text-xs font-mono">
               <div className="flex justify-between text-slate-500">
-                <span>Normal:</span>
+                <span>Before (Normal):</span>
                 <span>{impact.normalGridImportKWh} kWh</span>
               </div>
               <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -530,7 +642,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
               <div className="flex justify-between text-emerald-700 font-bold pt-1">
-                <span>Optimized:</span>
+                <span>After (Optimized):</span>
                 <span>{impact.optimizedGridImportKWh} kWh</span>
               </div>
               <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -546,6 +658,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Secondary metric footnote */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between text-[11px] text-slate-500">
+          <span>Potential cost impact: <strong className="text-slate-800 font-mono">₹{Math.abs(impact.potentialCostImpactINR).toFixed(2)}/day</strong></span>
+          <span>Estimated CO₂ reduction: <strong className="text-emerald-700 font-mono">{impact.co2AvoidedKg} kg CO₂e</strong> (based on assumed grid emission factor)</span>
         </div>
       </div>
     </div>

@@ -12,12 +12,13 @@ export interface OptimizationResult {
 }
 
 /**
- * Constraint-Aware Greedy Scheduling Optimizer with Multi-Factor Scoring.
+ * Constraint-Aware Greedy Scheduling Optimizer with Multi-Factor Scoring & Confidence Awareness.
  */
 export function optimizeApplianceSchedule(
   appliances: Appliance[],
   solarForecast: HourlyForecastPoint[],
-  household: HouseholdConfig
+  household: HouseholdConfig,
+  forecastConfidence: 'high' | 'medium' | 'low' = 'medium'
 ): OptimizationResult {
   const enabledAppliances = appliances.filter((a) => a.enabled && a.powerKW > 0 && a.durationHours > 0);
 
@@ -30,10 +31,6 @@ export function optimizeApplianceSchedule(
   enabledAppliances.forEach((a) => {
     currentSchedule[a.id] = a.normalStartHour;
   });
-
-  // Calculate baseline normal flow before any shifts
-  const normalDemand = estimateHouseholdDemand(enabledAppliances, household, currentSchedule);
-  const normalBalance = analyzeSolarDemandBalance(solarForecast, normalDemand, household);
 
   // 2. Sort flexible appliances: Most constrained first
   // Highly constrained: narrow allowed window, longer duration, high power, high priority
@@ -61,30 +58,34 @@ export function optimizeApplianceSchedule(
 
   // 3. For each flexible appliance, evaluate all feasible continuous start windows
   for (const appliance of sortedFlexible) {
-    const totalApplianceEnergyKWh = appliance.powerKW * appliance.durationHours;
     const normalStart = appliance.normalStartHour;
-
-    // Candidate start hours: iterate hour by hour in allowed window
-    // Ensure appliance completes within allowedEndHour: candidate + duration <= allowedEndHour
-    const candidateStarts: number[] = [];
     const minStart = Math.max(0, Math.min(23, appliance.allowedStartHour));
     const maxEnd = Math.max(1, Math.min(24, appliance.allowedEndHour));
+
+    const candidateStarts: number[] = [];
+    let hadOccupancyViolation = false;
 
     for (let candidateH = minStart; candidateH < maxEnd; candidateH++) {
       const endH = candidateH + appliance.durationHours;
       if (endH <= maxEnd) {
-        // Check occupancy constraint: if requiresOccupancy, all active hours must have household occupied
+        // Fractional occupancy check: verify only intervals where the appliance is actually running
         if (appliance.requiresOccupancy) {
           let occupancySatisfied = true;
-          for (let runH = candidateH; runH < Math.ceil(endH); runH++) {
-            const wrappedH = runH % 24;
-            if (!household.occupancyHours[wrappedH]) {
-              occupancySatisfied = false;
-              break;
+          for (let h = 0; h < 24; h++) {
+            const hourStart = h;
+            const hourEnd = h + 1;
+            const overlap = Math.max(0, Math.min(endH, hourEnd) - Math.max(candidateH, hourStart));
+            if (overlap > 0.001) {
+              const wrappedHour = h % 24;
+              if (!household.occupancyHours[wrappedHour]) {
+                occupancySatisfied = false;
+                hadOccupancyViolation = true;
+                break;
+              }
             }
           }
           if (!occupancySatisfied) {
-            continue; // Cannot place appliance when occupants are away
+            continue; // Cannot place appliance when occupants are away during active runtime
           }
         }
         candidateStarts.push(candidateH);
@@ -93,14 +94,35 @@ export function optimizeApplianceSchedule(
 
     // Always include the normal start hour if valid, for baseline comparison
     if (!candidateStarts.includes(normalStart)) {
-      // If normalStart is within allowed range, allow it as a candidate
       if (normalStart >= minStart && normalStart + appliance.durationHours <= maxEnd) {
-        candidateStarts.push(normalStart);
+        if (!appliance.requiresOccupancy) {
+          candidateStarts.push(normalStart);
+        } else {
+          // Check normal start occupancy
+          let normOccOk = true;
+          const endNorm = normalStart + appliance.durationHours;
+          for (let h = 0; h < 24; h++) {
+            const overlap = Math.max(0, Math.min(endNorm, h + 1) - Math.max(normalStart, h));
+            if (overlap > 0.001 && !household.occupancyHours[h % 24]) {
+              normOccOk = false;
+              break;
+            }
+          }
+          if (normOccOk) {
+            candidateStarts.push(normalStart);
+          }
+        }
       }
     }
 
-    // If no candidate start is possible due to constraints, keep normal start
+    // If no candidate start is possible due to constraints, handle "no-feasible-schedule"
     if (candidateStarts.length === 0) {
+      const failReason = appliance.durationHours > maxEnd - minStart
+        ? `Operating window (${minStart}:00 - ${maxEnd}:00) is too narrow for appliance duration (${appliance.durationHours}h).`
+        : hadOccupancyViolation
+        ? `All candidate hours within allowed window (${minStart}:00 - ${maxEnd}:00) conflict with household away schedule.`
+        : `No feasible continuous slot available within configured constraints.`;
+
       decisions.push({
         applianceId: appliance.id,
         applianceName: appliance.name,
@@ -110,21 +132,19 @@ export function optimizeApplianceSchedule(
         optimizedStartHour: normalStart,
         shiftHours: 0,
         changed: false,
+        status: 'no-feasible-schedule',
+        statusReason: failReason,
         solarBenefitKWh: 0,
         gridReductionKWh: 0,
         comfortPenalty: 0,
         tariffSaving: 0,
         score: 0,
-        confidence: 'high',
-        reason: 'Kept at normal time: No feasible operating window satisfied all occupancy and window constraints.',
+        confidence: forecastConfidence,
+        reason: `Kept at normal time: ${failReason}`,
         allowedWindow: { start: appliance.allowedStartHour, end: appliance.allowedEndHour },
       });
       continue;
     }
-
-    // Calculate baseline flow WITHOUT this appliance to measure incremental impact
-    const baseScheduleWithout = { ...currentSchedule };
-    delete baseScheduleWithout[appliance.id];
 
     // Evaluate each candidate start time
     interface CandidateEval {
@@ -139,21 +159,17 @@ export function optimizeApplianceSchedule(
 
     const candidateEvals: CandidateEval[] = [];
 
-    // Helper: calculate balance for a temporary test schedule
     for (const testStart of candidateStarts) {
       const testSchedule = { ...currentSchedule, [appliance.id]: testStart };
       const testDemand = estimateHouseholdDemand(enabledAppliances, household, testSchedule);
       const testBalance = analyzeSolarDemandBalance(solarForecast, testDemand, household);
 
-      // Measure total direct solar use and grid import under this candidate
       const totalDirectSolar = testBalance.reduce((sum, pt) => sum + pt.directSolarUseKWh, 0);
       const totalGridImport = testBalance.reduce((sum, pt) => sum + pt.gridImportKWh, 0);
       const totalCost = testBalance.reduce((sum, pt) => sum + pt.cost, 0);
 
-      // Distance from user's preferred normal start
       const rawDist = Math.abs(testStart - normalStart);
       const maxPossibleShift = Math.max(1, Math.max(normalStart - minStart, maxEnd - normalStart));
-      // Normalized comfort penalty: 0 (no shift) to 1 (maximum shift away)
       const comfortPenalty = Math.min(1, rawDist / Math.max(6, maxPossibleShift));
 
       candidateEvals.push({
@@ -163,7 +179,7 @@ export function optimizeApplianceSchedule(
         cost: totalCost,
         comfortPenalty,
         distanceFromNormal: rawDist,
-        score: 0, // will compute below
+        score: 0,
       });
     }
 
@@ -180,20 +196,17 @@ export function optimizeApplianceSchedule(
     const maxSolar = Math.max(...candidateEvals.map((c) => c.solarCapturedKWh));
     const solarRange = Math.max(0.001, maxSolar - minSolar);
 
-    // Multi-factor normalized score:
-    // Solar Benefit: weights capturing available solar (+60%)
-    // Grid import avoidance: (+30%)
-    // Comfort penalty: avoids frivolous shifts for tiny 0.05 kWh gains (-25%)
-    // Tariff saving: (-15% if cost is higher)
+    // Confidence-aware optimization weights:
+    // When confidence is low, penalize comfort disruptions more heavily and be conservative
+    const baseComfortWeight = appliance.requiresOccupancy ? 0.35 : 0.22;
+    const comfortMultiplier = forecastConfidence === 'low' ? 1.6 : forecastConfidence === 'medium' ? 1.1 : 1.0;
+    const comfortWeight = baseComfortWeight * comfortMultiplier;
+
     candidateEvals.forEach((c) => {
       const normSolarBenefit = solarRange > 0.05 ? (c.solarCapturedKWh - minSolar) / solarRange : 0;
       const normGridAvoided = gridRange > 0.05 ? (maxGrid - c.gridImportKWh) / gridRange : 0;
       const normCostAvoided = costRange > 0.1 ? (maxCost - c.cost) / costRange : 0;
 
-      // Comfort penalty weight: higher for appliances requiring occupancy
-      const comfortWeight = appliance.requiresOccupancy ? 0.35 : 0.22;
-
-      // Base candidate score
       c.score =
         normSolarBenefit * 0.60 +
         normGridAvoided * 0.25 +
@@ -201,42 +214,50 @@ export function optimizeApplianceSchedule(
         c.comfortPenalty * comfortWeight;
     });
 
-    // Find candidate representing normal start
     const normalEval = candidateEvals.find((c) => c.startHour === normalStart) || candidateEvals[0];
 
-    // Sort candidates by score descending
+    // Sort candidates: highest score first, tie-break to closest to preferred normal time and higher solar
     candidateEvals.sort((a, b) => {
-      // If scores are within 0.03 epsilon, prefer the slot closest to normal operating time
       if (Math.abs(b.score - a.score) < 0.03) {
-        return a.distanceFromNormal - b.distanceFromNormal;
+        if (a.distanceFromNormal !== b.distanceFromNormal) {
+          return a.distanceFromNormal - b.distanceFromNormal;
+        }
+        return b.solarCapturedKWh - a.solarCapturedKWh;
       }
       return b.score - a.score;
     });
 
     const bestCandidate = candidateEvals[0];
 
-    // Calculate incremental improvement of best candidate over normal start
     const incrementalSolarBenefit = Math.max(0, bestCandidate.solarCapturedKWh - normalEval.solarCapturedKWh);
     const incrementalGridReduction = Math.max(0, normalEval.gridImportKWh - bestCandidate.gridImportKWh);
     const tariffSaving = Number(Math.max(0, normalEval.cost - bestCandidate.cost).toFixed(2));
 
-    // Threshold rule: If best candidate provides negligible benefit (< 0.08 kWh), keep normal schedule
-    const isMeaningfulImprovement = incrementalSolarBenefit >= 0.08 || incrementalGridReduction >= 0.08;
+    // Confidence-aware threshold:
+    // When confidence is low, require higher threshold before shifting
+    const minGainThreshold = forecastConfidence === 'low' ? 0.20 : forecastConfidence === 'medium' ? 0.12 : 0.08;
+
+    const isMeaningfulImprovement = incrementalSolarBenefit >= minGainThreshold || incrementalGridReduction >= minGainThreshold;
     const shouldShift = bestCandidate.startHour !== normalStart && isMeaningfulImprovement && bestCandidate.score > normalEval.score + 0.05;
 
     const chosenStart = shouldShift ? bestCandidate.startHour : normalStart;
     const shiftHours = chosenStart - normalStart;
     const changed = chosenStart !== normalStart;
 
-    // Reason construction
     let reason = '';
+    let status: ApplianceScheduleDecision['status'] = 'optimal-as-is';
+
     if (!changed) {
-      if (incrementalSolarBenefit < 0.08) {
-        reason = `Kept at normal ${normalStart}:00. Solar gain from shifting was negligible (<0.1 kWh); preserves user schedule.`;
+      status = 'optimal-as-is';
+      if (bestCandidate.startHour === normalStart) {
+        reason = `Your current schedule already aligns well with available solar generation.`;
+      } else if (forecastConfidence === 'low') {
+        reason = `Kept at preferred ${normalStart}:00. Solar forecast confidence is low, so conservative scheduling maintains normal routine.`;
       } else {
-        reason = `Kept at normal ${normalStart}:00. Comfort and occupancy alignment outweighed minor solar gain.`;
+        reason = `Kept at preferred ${normalStart}:00. Estimated solar gain from shifting was negligible (<${minGainThreshold} kWh); preserving household comfort.`;
       }
     } else {
+      status = 'shifted';
       const dir = shiftHours > 0 ? `+${shiftHours}h` : `${shiftHours}h`;
       reason = `Shifted ${dir} from ${normalStart}:00 to ${chosenStart}:00. Aligns runtime with peak solar surplus, capturing +${incrementalSolarBenefit.toFixed(2)} kWh solar and reducing grid import.`;
     }
@@ -253,12 +274,13 @@ export function optimizeApplianceSchedule(
       optimizedStartHour: chosenStart,
       shiftHours,
       changed,
+      status,
       solarBenefitKWh: Number((shouldShift ? incrementalSolarBenefit : 0).toFixed(2)),
       gridReductionKWh: Number((shouldShift ? incrementalGridReduction : 0).toFixed(2)),
       comfortPenalty: Number((shouldShift ? bestCandidate.comfortPenalty : 0).toFixed(2)),
       tariffSaving: shouldShift ? tariffSaving : 0,
       score: Number((shouldShift ? bestCandidate.score : normalEval.score).toFixed(2)),
-      confidence: 'high',
+      confidence: forecastConfidence,
       reason,
       allowedWindow: { start: appliance.allowedStartHour, end: appliance.allowedEndHour },
     });
@@ -275,13 +297,14 @@ export function optimizeApplianceSchedule(
       optimizedStartHour: app.normalStartHour,
       shiftHours: 0,
       changed: false,
+      status: 'fixed',
       solarBenefitKWh: 0,
       gridReductionKWh: 0,
       comfortPenalty: 0,
       tariffSaving: 0,
       score: 1.0,
-      confidence: 'high',
-      reason: 'Fixed appliance. Cannot be rescheduled per household constraint.',
+      confidence: forecastConfidence,
+      reason: 'Fixed appliance. Must remain at user-configured schedule.',
       allowedWindow: { start: app.normalStartHour, end: app.normalStartHour + app.durationHours },
     });
   });

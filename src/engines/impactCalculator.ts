@@ -24,7 +24,12 @@ export function calculateImpactSummary(
   const normalHourly = analyzeSolarDemandBalance(forecast.hourly, normalDemand, household);
 
   // 2. Optimized schedule run via constraint-aware greedy optimizer
-  const optResult = optimizeApplianceSchedule(appliances, forecast.hourly, household);
+  const optResult = optimizeApplianceSchedule(
+    appliances,
+    forecast.hourly,
+    household,
+    forecast.forecastConfidence
+  );
   const optimizedDemand = estimateHouseholdDemand(appliances, household, optResult.scheduleMap);
   const optimizedHourly = analyzeSolarDemandBalance(forecast.hourly, optimizedDemand, household);
 

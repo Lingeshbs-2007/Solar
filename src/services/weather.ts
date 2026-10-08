@@ -2,6 +2,26 @@ import { calculateSolarForecast, generateDeterministicSolarProfile, RawHourlyWea
 import { SolarForecastResult } from '../models/forecast';
 import { LocationInfo } from '../models/household';
 
+export function getLocalTomorrowDate(timezone: string = 'Asia/Kolkata'): string {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const localDateStr = formatter.format(now); // "YYYY-MM-DD"
+    const [y, m, d] = localDateStr.split('-').map(Number);
+    const nextDate = new Date(Date.UTC(y, m - 1, d + 1));
+    return nextDate.toISOString().split('T')[0];
+  } catch {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  }
+}
+
 /**
  * Fetches next-day hourly solar weather data from Open-Meteo or falls back deterministically.
  */
@@ -10,11 +30,12 @@ export async function getSolarForecastForHousehold(
   panelCapacityKW: number,
   targetDate?: string
 ): Promise<SolarForecastResult> {
-  const tomorrow = targetDate || getTomorrowISOString();
+  const tomorrow = targetDate || getLocalTomorrowDate(location.timezone);
 
   try {
-    // Open-Meteo free solar radiation API endpoint
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&hourly=direct_normal_irradiance,diffuse_radiation,shortwave_radiation_instant,cloud_cover,temperature_2m&forecast_days=2&timezone=auto`;
+    const tzParam = encodeURIComponent(location.timezone || 'auto');
+    // Open-Meteo free solar radiation API endpoint with local timezone
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&hourly=direct_normal_irradiance,diffuse_radiation,shortwave_radiation_instant,cloud_cover,temperature_2m&forecast_days=3&timezone=${tzParam}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -34,7 +55,7 @@ export async function getSolarForecastForHousehold(
     const clouds: number[] = data.hourly?.cloud_cover || [];
     const temps: number[] = data.hourly?.temperature_2m || [];
 
-    // Filter points for target tomorrow date
+    // Filter points for target tomorrow date in local timezone
     const tomorrowIndices: number[] = [];
     hourlyTimes.forEach((timeStr, idx) => {
       if (timeStr.startsWith(tomorrow)) {
@@ -64,10 +85,4 @@ export async function getSolarForecastForHousehold(
     const fallbackData = generateDeterministicSolarProfile(location, tomorrow);
     return calculateSolarForecast(location, panelCapacityKW, fallbackData, tomorrow, true);
   }
-}
-
-function getTomorrowISOString(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ImpactSummary } from '../../models/impact';
 import { SolarForecastResult } from '../../models/forecast';
-import { ApplianceScheduleDecision } from '../../models/schedule';
+import { AIExplanationResult } from '../../services/aiRecommendation';
 import {
   Sun,
   Zap,
@@ -12,15 +12,34 @@ import {
   ChevronUp,
   ShieldCheck,
   CheckCircle2,
-  Calendar,
+  Sparkles,
+  AlertCircle,
+  RefreshCw,
+  TrendingDown,
+  Info,
 } from 'lucide-react';
 
 interface OptimizeViewProps {
   impact: ImpactSummary;
   forecast: SolarForecastResult;
+  aiExplanation?: AIExplanationResult | null;
+  isAiLoading?: boolean;
+  onRefreshAI?: () => void;
+  isPlanStale?: boolean;
+  onGeneratePlan?: () => void;
+  isGeneratingPlan?: boolean;
 }
 
-export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) => {
+export const OptimizeView: React.FC<OptimizeViewProps> = ({
+  impact,
+  forecast,
+  aiExplanation,
+  isAiLoading,
+  onRefreshAI,
+  isPlanStale,
+  onGeneratePlan,
+  isGeneratingPlan,
+}) => {
   const [expandedWhyId, setExpandedWhyId] = useState<string | null>(null);
 
   const toggleWhy = (id: string) => {
@@ -68,9 +87,13 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
     .map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${getX(pt.hour)} ${getY(pt.solarGenerationKWh)}`)
     .join(' ');
 
-  // Timeline hours from 6 AM to 10 PM (hours 6 to 22)
-  const timelineStart = 6;
-  const timelineEnd = 22;
+  // Dynamic useful solar window
+  const solarWinStart = forecast.usefulSolarWindow.startHour;
+  const solarWinEnd = forecast.usefulSolarWindow.endHour;
+
+  // Dynamic timeline span: show daylight & operating span (hours 5 to 23)
+  const timelineStart = 5;
+  const timelineEnd = 23;
   const timelineTotalHours = timelineEnd - timelineStart;
 
   const getTimelineLeftPercent = (hour: number) => {
@@ -78,20 +101,62 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
     return ((clamped - timelineStart) / timelineTotalHours) * 100;
   };
 
-  const solarWindowStartPct = getTimelineLeftPercent(forecast.usefulSolarWindow.startHour);
-  const solarWindowEndPct = getTimelineLeftPercent(forecast.usefulSolarWindow.endHour);
+  const solarWindowStartPct = getTimelineLeftPercent(solarWinStart);
+  const solarWindowEndPct = getTimelineLeftPercent(solarWinEnd);
   const solarWindowWidthPct = Math.max(0, solarWindowEndPct - solarWindowStartPct);
 
   return (
     <div className="space-y-6">
+      {/* Stale Plan Alert Banner */}
+      {isPlanStale && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-700 shrink-0" />
+            <div>
+              <h4 className="text-xs font-bold text-amber-900">
+                Plan needs to be regenerated
+              </h4>
+              <p className="text-[11px] text-amber-800/90">
+                Parameters have changed. Regenerate to see updated schedule recommendations.
+              </p>
+            </div>
+          </div>
+          {onGeneratePlan && (
+            <button
+              type="button"
+              onClick={onGeneratePlan}
+              disabled={isGeneratingPlan}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-xs cursor-pointer self-start sm:self-auto shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
+              <span>Regenerate Plan</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-          Optimize Tomorrow
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-          Find the best times to run flexible appliances using tomorrow&apos;s solar forecast.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Tomorrow&apos;s Smart Schedule
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+            Move flexible appliances toward forecasted solar availability while respecting your comfort and operating constraints.
+          </p>
+        </div>
+
+        {onGeneratePlan && (
+          <button
+            type="button"
+            onClick={onGeneratePlan}
+            disabled={isGeneratingPlan}
+            className="flex items-center gap-2 self-start sm:self-auto px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs cursor-pointer"
+          >
+            <Sparkles className={`w-4 h-4 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
+            <span>{isGeneratingPlan ? 'Optimizing...' : 'Generate Tomorrow\'s Plan'}</span>
+          </button>
+        )}
       </div>
 
       {/* TOP SECTION: Two Columns (Left Forecast with CI, Right Optimization Summary) */}
@@ -122,7 +187,6 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
 
           <div className="w-full overflow-x-auto">
             <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-auto min-w-[440px] select-none">
-              {/* Grid Lines */}
               {[0, 0.5, 1.0].map((frac) => {
                 const val = frac * maxY;
                 const y = getY(val);
@@ -136,10 +200,8 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
                 );
               })}
 
-              {/* Shaded confidence band */}
               <path d={confidenceBandPath} fill="#fde68a" fillOpacity="0.45" />
 
-              {/* Solar generation line */}
               <path
                 d={solarLinePath}
                 fill="none"
@@ -149,7 +211,6 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
                 strokeLinejoin="round"
               />
 
-              {/* X-axis labels */}
               {[6, 9, 12, 15, 18, 21].map((h) => (
                 <text
                   key={h}
@@ -168,7 +229,7 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
 
           <div className="flex items-center justify-between text-xs text-slate-500 pt-1 font-mono">
             <span>Peak: {formatHour12(forecast.peakGenerationHour)} ({forecast.peakGenerationKW} kW)</span>
-            <span>Total Expected: {forecast.totalSolarGenerationKWh} kWh</span>
+            <span>Forecast Confidence: <strong className="capitalize text-emerald-700 font-sans">{forecast.forecastConfidence}</strong></span>
           </div>
         </div>
 
@@ -180,54 +241,46 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
               Optimization Summary
             </h2>
             <span className="text-[11px] text-slate-500">
-              Computed by constraint-aware multi-factor greedy scheduler
+              Computed from your actual schedule comparison
             </span>
           </div>
 
-          <div className="space-y-3 text-xs font-mono">
+          <div className="space-y-2.5 text-xs font-mono">
             <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
-              <span className="text-slate-600 font-sans">Solar Available:</span>
-              <span className="font-bold text-slate-900 text-sm">{forecast.totalSolarGenerationKWh} kWh</span>
+              <span className="text-slate-600 font-sans">Current Grid Import:</span>
+              <span className="font-bold text-rose-600 text-sm">{impact.normalGridImportKWh} kWh</span>
             </div>
 
             <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
-              <span className="text-slate-600 font-sans">Flexible Loads:</span>
-              <span className="font-bold text-amber-600 text-sm">
-                {impact.applianceDecisions.filter((d) => d.changed || d.powerKW > 0).length} appliances
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
-              <span className="text-slate-600 font-sans">Potential Solar Shift:</span>
-              <span className="font-bold text-emerald-700 text-sm">
-                +{impact.solarDirectUseGainKWh} kWh direct
-              </span>
+              <span className="text-slate-600 font-sans">Optimized Grid Import:</span>
+              <span className="font-bold text-emerald-700 text-sm">{impact.optimizedGridImportKWh} kWh</span>
             </div>
 
             <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
               <span className="text-slate-600 font-sans">Grid Reduction:</span>
               <span className="font-bold text-emerald-700 text-sm">
-                -{impact.gridReductionKWh} kWh
+                -{impact.gridReductionKWh} kWh ({impact.gridReductionPct}%)
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+              <span className="text-slate-600 font-sans">Solar Self-Consumption:</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {impact.normalSelfConsumptionPct}% &rarr; {impact.optimizedSelfConsumptionPct}%
               </span>
             </div>
 
             <div className="flex items-center justify-between py-1.5">
-              <span className="text-slate-600 font-sans">Confidence:</span>
-              <span
-                className={`font-sans font-bold text-[11px] px-2 py-0.5 rounded-full capitalize ${
-                  forecast.forecastConfidence === 'high'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-amber-100 text-amber-800'
-                }`}
-              >
-                {forecast.forecastConfidence}
+              <span className="text-slate-600 font-sans">Estimated Cost Impact:</span>
+              <span className="font-bold text-slate-900 text-sm">
+                ₹{Math.abs(impact.potentialCostImpactINR).toFixed(2)}/day
               </span>
             </div>
           </div>
 
           <div className="bg-emerald-50/70 border border-emerald-200/60 rounded-xl p-3 text-[11px] text-emerald-900 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Deterministic engine evaluated all continuous feasible slots respecting occupancy.</span>
+            <span>Constraint-aware greedy algorithm checked allowed windows, durations, and occupancy presence.</span>
           </div>
         </div>
       </div>
@@ -238,10 +291,10 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
           <div>
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Clock className="w-4 h-4 text-emerald-600" />
-              Recommended Schedule Timeline
+              Dynamic Appliance Timeline
             </h2>
             <p className="text-xs text-slate-500">
-              Visualizing appliance shifts into tomorrow&apos;s strongest solar window (6 AM &ndash; 10 PM).
+              Visualizing appliance shifts into tomorrow&apos;s solar window ({formatHour12(solarWinStart)} &ndash; {formatHour12(solarWinEnd)}).
             </p>
           </div>
 
@@ -252,12 +305,12 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
             </div>
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 bg-emerald-600 rounded-full" />
-              <span className="text-slate-600 text-[11px]">Recommended Slot</span>
+              <span className="text-slate-600 text-[11px]">Optimized Slot</span>
             </div>
           </div>
         </div>
 
-        {/* 6 AM to 10 PM Timeline Rail */}
+        {/* Dynamic Timeline Rail */}
         <div className="relative pt-6 pb-2">
           {/* Top Axis Bar */}
           <div className="h-2 bg-slate-100 rounded-full relative overflow-visible">
@@ -271,20 +324,20 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
             >
               <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1 whitespace-nowrap">
                 <Sun className="w-3 h-3 fill-amber-500 text-amber-500" />
-                Solar Window ({formatHour12(forecast.usefulSolarWindow.startHour)} -{' '}
-                {formatHour12(forecast.usefulSolarWindow.endHour)})
+                Solar Window ({formatHour12(solarWinStart)} - {formatHour12(solarWinEnd)})
               </span>
             </div>
           </div>
 
           {/* Time Labels */}
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-2">
-            <span>6 AM</span>
-            <span>9 AM</span>
-            <span>12 PM</span>
-            <span>3 PM</span>
-            <span>6 PM</span>
-            <span>10 PM</span>
+            <span>5 AM</span>
+            <span>8 AM</span>
+            <span>11 AM</span>
+            <span>2 PM</span>
+            <span>5 PM</span>
+            <span>8 PM</span>
+            <span>11 PM</span>
           </div>
 
           {/* Branched Appliance Nodes */}
@@ -314,18 +367,22 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
                           <span className="font-bold text-slate-900 text-sm">
                             {decision.applianceName}
                           </span>
-                          {decision.changed ? (
+                          {decision.status === 'shifted' ? (
                             <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.2 rounded-full uppercase tracking-wider">
                               Shifted
                             </span>
+                          ) : decision.status === 'no-feasible-schedule' ? (
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.2 rounded-full uppercase tracking-wider">
+                              Constrained
+                            </span>
                           ) : (
                             <span className="text-[10px] font-medium text-slate-500 bg-slate-200 px-2 py-0.2 rounded-full">
-                              No change
+                              No change needed
                             </span>
                           )}
                         </div>
                         <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                          {decision.powerKW} kW &bull; {decision.durationHours} hr runtime
+                          {decision.powerKW} kW &bull; {decision.durationHours} hr runtime &bull; Priority: {decision.applianceName}
                         </div>
                       </div>
                     </div>
@@ -366,7 +423,6 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
 
                   {/* Visual Node Pin on Mini Rail */}
                   <div className="mt-3 relative h-1.5 bg-slate-200 rounded-full">
-                    {/* Solar window backing */}
                     <div
                       className="absolute top-0 bottom-0 bg-amber-300/40"
                       style={{
@@ -374,7 +430,6 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
                         width: `${solarWindowWidthPct}%`,
                       }}
                     />
-                    {/* Pin marker */}
                     <div
                       className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-emerald-600 border-2 border-white shadow-xs"
                       style={{ left: `${optLeftPct}%` }}
@@ -387,15 +442,16 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
                     <div className="mt-3 pt-2.5 border-t border-slate-200/70 text-xs text-slate-700 bg-white p-3 rounded-lg border space-y-1.5 animate-in fade-in">
                       <div className="font-semibold text-slate-900 flex items-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Optimizer Decision Rationale:</span>
+                        <span>Why this recommendation?</span>
                       </div>
                       <p className="text-[11px] text-slate-600 leading-relaxed">
                         {decision.reason}
                       </p>
                       <div className="flex flex-wrap gap-3 text-[10px] text-slate-500 font-mono pt-1">
                         <span>Allowed Window: {formatHour12(decision.allowedWindow.start)} - {formatHour12(decision.allowedWindow.end)}</span>
-                        <span>Solar Captured: +{decision.solarBenefitKWh} kWh</span>
-                        <span>Grid Import Avoided: {decision.gridReductionKWh} kWh</span>
+                        <span>Confidence: {decision.confidence}</span>
+                        {decision.solarBenefitKWh > 0 && <span>Direct Solar Captured: +{decision.solarBenefitKWh} kWh</span>}
+                        {decision.gridReductionKWh > 0 && <span>Grid Avoided: {decision.gridReductionKWh} kWh</span>}
                       </div>
                     </div>
                   )}
@@ -405,6 +461,44 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({ impact, forecast }) 
           </div>
         </div>
       </div>
+
+      {/* AI Recommendation Summary Card */}
+      {aiExplanation && (
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-600" />
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                Why This Plan? (Energy Analysis)
+              </h3>
+            </div>
+            {onRefreshAI && (
+              <button
+                type="button"
+                onClick={onRefreshAI}
+                disabled={isAiLoading}
+                className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 font-medium"
+              >
+                <RefreshCw className={`w-3 h-3 ${isAiLoading ? 'animate-spin' : ''}`} />
+                <span>Re-analyze</span>
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-2 text-xs text-slate-700">
+            <h4 className="font-bold text-emerald-900 text-sm">{aiExplanation.headline}</h4>
+            <p className="text-slate-600 leading-relaxed">{aiExplanation.summaryParagraph}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {aiExplanation.keyInsights.slice(0, 4).map((insight, idx) => (
+                <div key={idx} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/70 text-[11px] text-slate-700 flex items-start gap-2">
+                  <span className="font-bold text-emerald-700 font-mono shrink-0">&bull;</span>
+                  <span>{insight}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

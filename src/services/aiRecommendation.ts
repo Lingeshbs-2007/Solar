@@ -52,7 +52,7 @@ function generateDeterministicExplanation(impact: ImpactSummary): AIExplanationR
       `Set appliance delayed-start timers before leaving the house to match the suggested hours.`
     );
     actionableGuidance.push(
-      `Avoid running heavy appliances simultaneously during peak solar hours if you exceed rooftop inverter capacity.`
+      `Run flexible appliances within their recommended windows to capture maximum forecasted solar generation.`
     );
   } else {
     actionableGuidance.push(

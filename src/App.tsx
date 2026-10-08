@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   HouseholdConfig,
   DEFAULT_HOUSEHOLD_CONFIG,
@@ -9,6 +9,7 @@ import { SolarForecastResult } from './models/forecast';
 import { ImpactSummary } from './models/impact';
 import { getSolarForecastForHousehold } from './services/weather';
 import { calculateImpactSummary } from './engines/impactCalculator';
+import { AIExplanationResult, getAIOptimizationExplanation } from './services/aiRecommendation';
 
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -18,56 +19,175 @@ import { SolarAIView } from './components/assistant/SolarAIView';
 import { HomeSetupView } from './components/setup/HomeSetupView';
 import { AppliancesView } from './components/appliances/AppliancesView';
 
-import { Menu, Sun, Sparkles, AlertCircle } from 'lucide-react';
+import { Menu, Sun, Sparkles, RefreshCw } from 'lucide-react';
+
+const STORAGE_KEY_HOUSEHOLD = 'solarflow_household_v1';
+const STORAGE_KEY_APPLIANCES = 'solarflow_appliances_v1';
+const STORAGE_KEY_PLAN = 'solarflow_plan_v1';
 
 export default function App() {
-  // Household configuration state
-  const [household, setHousehold] = useState<HouseholdConfig>(DEFAULT_HOUSEHOLD_CONFIG);
+  // Single Source of Truth for Household & Appliances with localStorage restoration
+  const [household, setHouseholdState] = useState<HouseholdConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_HOUSEHOLD);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed restoring household from storage:', e);
+    }
+    return DEFAULT_HOUSEHOLD_CONFIG;
+  });
 
-  // Appliances state
-  const [appliances, setAppliances] = useState<Appliance[]>(DEMO_APPLIANCES);
+  const [appliances, setAppliancesState] = useState<Appliance[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_APPLIANCES);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed restoring appliances from storage:', e);
+    }
+    return DEMO_APPLIANCES;
+  });
 
-  // Navigation state (Dashboard is default)
+  // Navigation state
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-  // Solar forecast state
+  // Solar forecast & Optimization impact state
   const [forecast, setForecast] = useState<SolarForecastResult | null>(null);
-  const [isForecastLoading, setIsForecastLoading] = useState<boolean>(true);
+  const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
 
-  // Dynamically calculate next-day solar forecast whenever location or panel capacity changes
+  // Generation status and stale flag
+  const [isPlanStale, setIsPlanStale] = useState<boolean>(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
+  const [generationStage, setGenerationStage] = useState<string | null>(null);
+
+  // AI Explanation
+  const [aiExplanation, setAiExplanation] = useState<AIExplanationResult | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
+
+  // Track initial mount
+  const isFirstMount = useRef(true);
+
+  // Update household wrapper that flags plan as stale and persists
+  const handleUpdateHousehold = useCallback((updated: HouseholdConfig) => {
+    setHouseholdState(updated);
+    setIsPlanStale(true);
+    try {
+      localStorage.setItem(STORAGE_KEY_HOUSEHOLD, JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Storage save failed:', e);
+    }
+  }, []);
+
+  // Update appliances wrapper that flags plan as stale and persists
+  const handleUpdateAppliances = useCallback((updated: Appliance[]) => {
+    setAppliancesState(updated);
+    setIsPlanStale(true);
+    try {
+      localStorage.setItem(STORAGE_KEY_APPLIANCES, JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Storage save failed:', e);
+    }
+  }, []);
+
+  // Staged Execution Pipeline: Generate Tomorrow's Plan
+  const handleGeneratePlan = useCallback(
+    async (customHousehold?: HouseholdConfig, customAppliances?: Appliance[]) => {
+      const targetHousehold = customHousehold || household;
+      const targetAppliances = customAppliances || appliances;
+
+      setIsGeneratingPlan(true);
+
+      try {
+        // Stage 1: Fetching forecast
+        setGenerationStage('Stage 1/5: Querying weather & solar forecast...');
+        await new Promise((r) => setTimeout(r, 220));
+        const newForecast = await getSolarForecastForHousehold(
+          targetHousehold.location,
+          targetHousehold.panelCapacityKW
+        );
+        setForecast(newForecast);
+
+        // Stage 2: Estimating demand
+        setGenerationStage('Stage 2/5: Estimating 24-hour demand profile...');
+        await new Promise((r) => setTimeout(r, 180));
+
+        // Stage 3: Finding solar mismatch & greedy optimization
+        setGenerationStage('Stage 3/5: Running constraint-aware optimizer...');
+        await new Promise((r) => setTimeout(r, 200));
+
+        // Stage 4: Calculating impact
+        setGenerationStage('Stage 4/5: Calculating schedule impact & self-consumption...');
+        await new Promise((r) => setTimeout(r, 160));
+        const newImpact = calculateImpactSummary(targetAppliances, newForecast, targetHousehold);
+        setImpactSummary(newImpact);
+
+        // Stage 5: Plan ready
+        setGenerationStage('Stage 5/5: Plan ready!');
+        await new Promise((r) => setTimeout(r, 150));
+
+        setIsPlanStale(false);
+
+        // Persist generated plan
+        try {
+          localStorage.setItem(STORAGE_KEY_PLAN, JSON.stringify({
+            forecast: newForecast,
+            impact: newImpact,
+            timestamp: Date.now(),
+          }));
+        } catch (e) {
+          console.warn('Storage plan save failed:', e);
+        }
+
+        // Asynchronously request AI explanation
+        setIsAiLoading(true);
+        getAIOptimizationExplanation(newImpact)
+          .then((res) => setAiExplanation(res))
+          .catch((err) => console.warn('AI explanation failed:', err))
+          .finally(() => setIsAiLoading(false));
+      } catch (err) {
+        console.error('Plan generation failed:', err);
+      } finally {
+        setIsGeneratingPlan(false);
+        setGenerationStage(null);
+      }
+    },
+    [household, appliances]
+  );
+
+  // On mount: restore previous valid plan or generate plan
   useEffect(() => {
-    let isCancelled = false;
-    setIsForecastLoading(true);
+    if (!isFirstMount.current) return;
+    isFirstMount.current = false;
 
-    getSolarForecastForHousehold(household.location, household.panelCapacityKW)
-      .then((res) => {
-        if (!isCancelled) {
-          setForecast(res);
-          setIsForecastLoading(false);
+    try {
+      const savedPlanStr = localStorage.getItem(STORAGE_KEY_PLAN);
+      if (savedPlanStr) {
+        const parsed = JSON.parse(savedPlanStr);
+        if (parsed.forecast && parsed.impact) {
+          setForecast(parsed.forecast);
+          setImpactSummary(parsed.impact);
+          setIsPlanStale(false);
+
+          // Get initial AI explanation
+          setIsAiLoading(true);
+          getAIOptimizationExplanation(parsed.impact)
+            .then((res) => setAiExplanation(res))
+            .catch(() => {})
+            .finally(() => setIsAiLoading(false));
+          return;
         }
-      })
-      .catch((err) => {
-        console.error('Forecast calculation error:', err);
-        if (!isCancelled) {
-          setIsForecastLoading(false);
-        }
-      });
+      }
+    } catch (e) {
+      console.warn('Could not restore saved plan:', e);
+    }
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [household.location, household.panelCapacityKW]);
+    // Generate initial plan if none saved
+    handleGeneratePlan();
+  }, [handleGeneratePlan]);
 
-  // Dynamically compute live optimization and normal vs optimized impact summary
-  const impactSummary: ImpactSummary | null = useMemo(() => {
-    if (!forecast) return null;
-    return calculateImpactSummary(appliances, forecast, household);
-  }, [appliances, forecast, household]);
-
-  // Handler: Load Standard Demo Household (preserves real calculation pipeline)
+  // Handler: Load Standard Demo Household
   const handleLoadDemoHousehold = useCallback(() => {
-    setHousehold({
+    const demoH: HouseholdConfig = {
       ...DEFAULT_HOUSEHOLD_CONFIG,
       panelCapacityKW: 3.0,
       occupantsCount: 4,
@@ -80,10 +200,21 @@ export default function App() {
       peakStartHour: 18,
       peakEndHour: 22,
       solarExportEnabled: true,
-    });
-    setAppliances(DEMO_APPLIANCES);
+    };
+
+    setHouseholdState(demoH);
+    setAppliancesState(DEMO_APPLIANCES);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_HOUSEHOLD, JSON.stringify(demoH));
+      localStorage.setItem(STORAGE_KEY_APPLIANCES, JSON.stringify(DEMO_APPLIANCES));
+    } catch (e) {
+      console.warn(e);
+    }
+
+    handleGeneratePlan(demoH, DEMO_APPLIANCES);
     setActiveTab('dashboard');
-  }, []);
+  }, [handleGeneratePlan]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex antialiased">
@@ -127,27 +258,48 @@ export default function App() {
 
         {/* Page Content Body */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          {/* Fallback loading indicator if forecast is recalculating */}
-          {isForecastLoading && !forecast ? (
+          {/* Initial Loading skeleton if forecast hasn't arrived yet */}
+          {!forecast || !impactSummary ? (
             <div className="h-96 flex flex-col items-center justify-center space-y-3">
-              <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs font-medium text-slate-500">
-                Calculating tomorrow&apos;s solar generation & demand model...
+              <div className="w-9 h-9 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs font-semibold text-slate-600">
+                {generationStage || 'Initializing SolarFlow Optimization Engine...'}
               </p>
             </div>
-          ) : impactSummary && forecast ? (
+          ) : (
             <>
               {/* Active Tab Router */}
               {activeTab === 'dashboard' && (
                 <DashboardView
                   impact={impactSummary}
                   forecast={forecast}
+                  isPlanStale={isPlanStale}
+                  isGeneratingPlan={isGeneratingPlan}
+                  generationStage={generationStage}
+                  onGeneratePlan={() => handleGeneratePlan()}
                   onGoToOptimize={() => setActiveTab('optimize')}
                 />
               )}
 
               {activeTab === 'optimize' && (
-                <OptimizeView impact={impactSummary} forecast={forecast} />
+                <OptimizeView
+                  impact={impactSummary}
+                  forecast={forecast}
+                  aiExplanation={aiExplanation}
+                  isAiLoading={isAiLoading}
+                  onRefreshAI={() => {
+                    if (impactSummary) {
+                      setIsAiLoading(true);
+                      getAIOptimizationExplanation(impactSummary)
+                        .then((res) => setAiExplanation(res))
+                        .catch(() => {})
+                        .finally(() => setIsAiLoading(false));
+                    }
+                  }}
+                  isPlanStale={isPlanStale}
+                  onGeneratePlan={() => handleGeneratePlan()}
+                  isGeneratingPlan={isGeneratingPlan}
+                />
               )}
 
               {activeTab === 'monitor' && <SolarMonitorView forecast={forecast} />}
@@ -157,18 +309,18 @@ export default function App() {
               )}
 
               {activeTab === 'household' && (
-                <HomeSetupView config={household} onChange={setHousehold} />
+                <HomeSetupView config={household} onChange={handleUpdateHousehold} />
               )}
 
               {activeTab === 'appliances' && (
                 <AppliancesView
                   appliances={appliances}
-                  onChange={setAppliances}
+                  onChange={handleUpdateAppliances}
                   onLoadDemo={handleLoadDemoHousehold}
                 />
               )}
             </>
-          ) : null}
+          )}
         </main>
       </div>
     </div>

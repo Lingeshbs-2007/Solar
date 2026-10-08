@@ -16,34 +16,44 @@ export const SUGGESTED_QUESTIONS = [
 ];
 
 /**
- * Deterministic fallback responses when AI server is unreachable or offline.
+ * Deterministic fallback responses grounded strictly in current application state.
+ * Never invents fake numbers or unsupported inverter claims.
  */
-function getDeterministicAnswer(question: string, impact: ImpactSummary | null): string {
+function getDeterministicAnswer(question: string, impact: ImpactSummary | null, household: HouseholdConfig): string {
   const q = question.toLowerCase();
 
-  if (q.includes('washing machine') || q.includes('afternoon') || q.includes('why should i run')) {
-    const shifted = impact?.applianceDecisions.find((d) => d.changed);
+  if (!impact) {
+    return 'I do not have an optimization plan yet. Click "Generate Tomorrow\'s Plan" first to calculate your solar forecast and personalized appliance recommendations.';
+  }
+
+  const { forecast, applianceDecisions, optimizedSelfConsumptionPct, normalSelfConsumptionPct, gridReductionKWh } = impact;
+  const solarWindowStr = `${forecast.usefulSolarWindow.startHour}:00 - ${forecast.usefulSolarWindow.endHour}:00`;
+
+  if (q.includes('washing machine') || q.includes('afternoon') || q.includes('why should i run') || q.includes('appliance')) {
+    const shifted = applianceDecisions.find((d) => d.changed);
     if (shifted) {
-      return `Moving ${shifted.applianceName} to ${shifted.optimizedStartHour}:00 aligns its ${shifted.powerKW} kW draw directly with peak solar irradiance (${impact?.forecast.usefulSolarWindow.startHour}:00 - ${impact?.forecast.usefulSolarWindow.endHour}:00). This captures +${shifted.solarBenefitKWh} kWh of clean solar rather than buying grid electricity at normal evening rates.`;
+      return `Moving ${shifted.applianceName} to start at ${shifted.optimizedStartHour}:00 aligns its ${shifted.powerKW} kW draw directly with tomorrow's predicted solar window (${solarWindowStr}). This directly supplies +${shifted.solarBenefitKWh} kWh from rooftop solar and reduces grid import.`;
     }
-    return `Running flexible appliances like washing machines during peak daylight (11 AM - 3 PM) lets them consume rooftop solar energy directly rather than pulling power from the grid during expensive evening peak hours.`;
+    return `Your appliances are already scheduled in optimal or fixed hours. For any flexible appliance, operating inside your solar window (${solarWindowStr}) allows clean self-consumption rather than grid import.`;
   }
 
   if (q.includes('lower') || q.includes('weather') || q.includes('cloud')) {
-    const cloud = impact?.forecast.weatherSummary;
-    return `Tomorrow's forecasted solar output is influenced by local cloud cover and irradiance. ${cloud || 'Scattered clouds reduce peak direct sunlight, so the optimizer schedules loads conservatively during the clearest midday hours.'}`;
+    return `Tomorrow's forecasted solar output for ${household.location.name} is ${forecast.totalSolarGenerationKWh} kWh with ${forecast.forecastConfidence} confidence. ${forecast.weatherSummary}`;
   }
 
   if (q.includes('self-consumption') || q.includes('what does')) {
-    const pct = impact?.optimizedSelfConsumptionPct || 70;
-    return `Solar self-consumption is the percentage of rooftop solar energy consumed on-site by your appliances rather than exported to the grid. In your plan, self-consumption is projected at ${pct}%. Using solar directly is significantly more valuable than selling it back at low feed-in tariffs.`;
+    return `Solar self-consumption is the fraction of rooftop solar electricity used directly by your home rather than exported to the grid. In your plan, self-consumption increases from ${normalSelfConsumptionPct}% to ${optimizedSelfConsumptionPct}%, maximizing value since direct solar use offsets utility tariffs.`;
+  }
+
+  if (q.includes('grid') || q.includes('reduce') || q.includes('savings')) {
+    return `Following tomorrow's recommended schedule reduces your grid electricity import by an estimated ${gridReductionKWh} kWh (from ${impact.normalGridImportKWh} kWh down to ${impact.optimizedGridImportKWh} kWh).`;
   }
 
   if (q.includes('improve') || q.includes('tips') || q.includes('usage')) {
-    return `To maximize your solar efficiency: (1) Use appliance delay timers to align laundry and dishwashing between 11 AM and 3 PM; (2) Avoid running multiple heavy appliances simultaneously to prevent exceeding your inverter limit; (3) Check for roof shading around midday.`;
+    return `To maximize solar utilization: (1) Use appliance delay-start timers to target the solar window (${solarWindowStr}); (2) Ensure appliances requiring occupancy run when family members are home; (3) Check panel cleanliness before high-irradiance days.`;
   }
 
-  return `Based on tomorrow's solar forecast of ${impact?.forecast.totalSolarGenerationKWh || 14} kWh, the best strategy is shifting flexible appliances into the ${impact?.forecast.usefulSolarWindow.startHour || 11}:00 to ${impact?.forecast.usefulSolarWindow.endHour || 16}:00 window, boosting clean self-consumption to ${impact?.optimizedSelfConsumptionPct || 72}%.`;
+  return `Based on tomorrow's forecast of ${forecast.totalSolarGenerationKWh} kWh for your ${household.panelCapacityKW} kW array, running flexible loads during the solar window (${solarWindowStr}) optimizes clean self-consumption to ${optimizedSelfConsumptionPct}%.`;
 }
 
 export async function askSolarAssistant(
@@ -60,6 +70,7 @@ export async function askSolarAssistant(
         peakHour: impact.forecast.peakGenerationHour,
         usefulSolarWindow: impact.forecast.usefulSolarWindow,
         forecastConfidence: impact.forecast.forecastConfidence,
+        weatherSummary: impact.forecast.weatherSummary,
         selfConsumption: {
           normal: impact.normalSelfConsumptionPct,
           optimized: impact.optimizedSelfConsumptionPct,
@@ -72,6 +83,7 @@ export async function askSolarAssistant(
             normal: `${d.normalStartHour}:00`,
             optimized: `${d.optimizedStartHour}:00`,
             solarBenefitKWh: d.solarBenefitKWh,
+            reason: d.reason,
           })),
       }
     : null;
@@ -96,8 +108,8 @@ export async function askSolarAssistant(
     if (data.answer) {
       return data.answer;
     }
-    return getDeterministicAnswer(question, impact);
+    return getDeterministicAnswer(question, impact, household);
   } catch {
-    return getDeterministicAnswer(question, impact);
+    return getDeterministicAnswer(question, impact, household);
   }
 }

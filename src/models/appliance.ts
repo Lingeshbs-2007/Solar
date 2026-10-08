@@ -1,5 +1,4 @@
 export type AppliancePriority = 'high' | 'medium' | 'low';
-export type DaysApplicable = 'all' | 'weekdays' | 'weekends';
 
 export interface Appliance {
   id: string;
@@ -13,7 +12,7 @@ export interface Appliance {
   allowedEndHour: number;     // Latest acceptable finish hour (0-24)
   requiresOccupancy: boolean; // Must someone be home while it runs
   priority: AppliancePriority;
-  daysApplicable: DaysApplicable;
+  daysApplicable?: string;    // Kept optional for backward compatibility
   enabled: boolean;
 }
 
@@ -62,6 +61,17 @@ export function validateAppliance(app: Partial<Appliance>): ApplianceValidationE
           field: 'durationHours',
           message: `Appliance duration (${app.durationHours}h) cannot exceed allowed window (${windowLength}h)`,
         });
+      }
+
+      // Validate that normal/preferred start time fits inside allowed window
+      if (app.normalStartHour !== undefined && app.durationHours !== undefined) {
+        const runEnd = app.normalStartHour + app.durationHours;
+        if (app.normalStartHour < app.allowedStartHour || runEnd > app.allowedEndHour) {
+          errors.push({
+            field: 'normalStartHour',
+            message: `Normal start time (${app.normalStartHour}:00 - ${runEnd}:00) must fit inside the allowed operating window (${app.allowedStartHour}:00 - ${app.allowedEndHour}:00)`,
+          });
+        }
       }
     }
   }

@@ -32,6 +32,8 @@ export interface ApplianceScheduleDecision {
   optimizedStartHour: number;
   shiftHours: number;               // optimizedStart - normalStart
   changed: boolean;
+  status: 'shifted' | 'optimal-as-is' | 'no-feasible-schedule' | 'fixed';
+  statusReason?: string;
   solarBenefitKWh: number;          // Additional solar directly captured by this appliance
   gridReductionKWh: number;         // Avoided grid import
   comfortPenalty: number;           // 0..1 scale normalized penalty for shifting
