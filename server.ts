@@ -16,7 +16,10 @@ const isProduction = process.env.NODE_ENV === 'production';
 app.use(express.json());
 
 // Initialize Google GenAI client server-side
-const apiKey = process.env.GEMINI_API_KEY;
+// Supports GEMINI_API_KEY, gemini_api_key, and strips accidental quotes/spaces
+const rawApiKey = (process.env.GEMINI_API_KEY || process.env.gemini_api_key || '').trim().replace(/^['"]|['"]$/g, '');
+const apiKey = rawApiKey && rawApiKey !== 'MY_GEMINI_API_KEY' && rawApiKey !== 'my_gemini_api_key' ? rawApiKey : '';
+
 let aiClient: GoogleGenAI | null = null;
 if (apiKey) {
   aiClient = new GoogleGenAI({
@@ -27,9 +30,12 @@ if (apiKey) {
       },
     },
   });
+  console.log('✅ Google Gemini API client initialized successfully');
+} else {
+  console.warn('⚠️ No valid GEMINI_API_KEY provided in .env (or placeholder value detected). Solar assistant will use high-accuracy deterministic solar domain responses until an API key is set.');
 }
 
-const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 
 async function generateWithFallback(options: {
   contents: any;

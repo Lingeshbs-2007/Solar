@@ -4,7 +4,9 @@ import {
   POPULAR_LOCATIONS,
   OccupancyPattern,
   getDefaultOccupancyHours,
+  LocationInfo,
 } from '../../models/household';
+import { LocationPicker } from '../common/LocationPicker';
 import {
   Sun,
   Users,
@@ -88,23 +90,21 @@ export const HomeSetupView: React.FC<HomeSetupViewProps> = ({ config, onChange }
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-slate-500" />
-              Installation Location
+            <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                Installation Location & Precise Map
+              </span>
+              <span className="text-[10px] text-emerald-700 font-mono">
+                {config.location.latitude.toFixed(2)}°N, {config.location.longitude.toFixed(2)}°E
+              </span>
             </label>
-            <select
-              value={config.location.name}
-              onChange={(e) => handleLocationChange(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-emerald-600 transition-colors"
-            >
-              {POPULAR_LOCATIONS.map((loc) => (
-                <option key={loc.name} value={loc.name}>
-                  {loc.name}
-                </option>
-              ))}
-            </select>
+            <LocationPicker
+              currentLocation={config.location}
+              onSelectLocation={(newLoc) => onChange({ ...config, location: newLoc })}
+            />
             <span className="text-[11px] text-slate-400 mt-1 block">
-              Used to query local solar irradiance and weather forecast for tomorrow.
+              Tap the map pin or GPS symbol to auto-detect your exact rooftop location and weather.
             </span>
           </div>
 

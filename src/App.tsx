@@ -3,6 +3,7 @@ import {
   HouseholdConfig,
   DEFAULT_HOUSEHOLD_CONFIG,
   getDefaultOccupancyHours,
+  LocationInfo,
 } from './models/household';
 import { Appliance, DEMO_APPLIANCES } from './models/appliance';
 import { SolarForecastResult } from './models/forecast';
@@ -82,29 +83,63 @@ export default function App() {
   // Track initial mount
   const isFirstMount = useRef(true);
 
-  // Update household wrapper that flags plan as stale and persists
+  // Update household wrapper that flags plan and immediately recalculates impact if forecast exists
   const handleUpdateHousehold = useCallback((updated: HouseholdConfig) => {
     setHouseholdState(updated);
-    setIsPlanStale(true);
-    setAiExplanation(null);
     try {
       localStorage.setItem(STORAGE_KEY_HOUSEHOLD, JSON.stringify(updated));
     } catch (e) {
       console.warn('Storage save failed:', e);
     }
-  }, []);
 
-  // Update appliances wrapper that flags plan as stale and persists
+    if (forecast) {
+      const newImpact = calculateImpactSummary(appliances, forecast, updated);
+      setImpactSummary(newImpact);
+      setIsPlanStale(false);
+      try {
+        const planRecord: StoredOptimizationPlan = {
+          householdSignature: getHouseholdSignature(updated),
+          applianceSignature: getAppliancesSignature(appliances),
+          forecast,
+          impact: newImpact,
+          generatedAt: Date.now(),
+        };
+        localStorage.setItem(STORAGE_KEY_PLAN, JSON.stringify(planRecord));
+      } catch (e) {}
+    } else {
+      setIsPlanStale(true);
+    }
+    setAiExplanation(null);
+  }, [appliances, forecast]);
+
+  // Update appliances wrapper that flags plan and immediately recalculates impact if forecast exists
   const handleUpdateAppliances = useCallback((updated: Appliance[]) => {
     setAppliancesState(updated);
-    setIsPlanStale(true);
-    setAiExplanation(null);
     try {
       localStorage.setItem(STORAGE_KEY_APPLIANCES, JSON.stringify(updated));
     } catch (e) {
       console.warn('Storage save failed:', e);
     }
-  }, []);
+
+    if (forecast) {
+      const newImpact = calculateImpactSummary(updated, forecast, household);
+      setImpactSummary(newImpact);
+      setIsPlanStale(false);
+      try {
+        const planRecord: StoredOptimizationPlan = {
+          householdSignature: getHouseholdSignature(household),
+          applianceSignature: getAppliancesSignature(updated),
+          forecast,
+          impact: newImpact,
+          generatedAt: Date.now(),
+        };
+        localStorage.setItem(STORAGE_KEY_PLAN, JSON.stringify(planRecord));
+      } catch (e) {}
+    } else {
+      setIsPlanStale(true);
+    }
+    setAiExplanation(null);
+  }, [household, forecast]);
 
   // Staged Execution Pipeline: Generate Tomorrow's Plan
   const handleGeneratePlan = useCallback(
@@ -176,6 +211,25 @@ export default function App() {
       }
     },
     [household, appliances]
+  );
+
+  // Directly update location and re-run solar forecast for new coordinates immediately
+  const handleUpdateLocation = useCallback(
+    (newLocation: LocationInfo) => {
+      const updatedHousehold: HouseholdConfig = {
+        ...household,
+        location: newLocation,
+      };
+      setHouseholdState(updatedHousehold);
+      try {
+        localStorage.setItem(STORAGE_KEY_HOUSEHOLD, JSON.stringify(updatedHousehold));
+      } catch (e) {
+        console.warn('Storage save failed:', e);
+      }
+      // Re-trigger solar forecast & optimization plan for the precise location
+      handleGeneratePlan(updatedHousehold);
+    },
+    [household, handleGeneratePlan]
   );
 
   // On mount: restore previous plan with signature validation, or generate plan
@@ -320,6 +374,8 @@ export default function App() {
                   isPlanStale={isPlanStale}
                   isGeneratingPlan={isGeneratingPlan}
                   generationStage={generationStage}
+                  location={household.location}
+                  onSelectLocation={handleUpdateLocation}
                   onGeneratePlan={() => handleGeneratePlan()}
                   onGoToOptimize={() => setActiveTab('optimize')}
                 />

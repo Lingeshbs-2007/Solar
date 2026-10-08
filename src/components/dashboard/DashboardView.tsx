@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { ImpactSummary } from '../../models/impact';
 import { SolarForecastResult } from '../../models/forecast';
+import { LocationInfo } from '../../models/household';
+import { LocationPicker } from '../common/LocationPicker';
 import {
   Sun,
   Zap,
   ArrowDownToLine,
+  ArrowDownRight,
   TrendingUp,
   Clock,
   CheckCircle2,
@@ -24,6 +27,8 @@ interface DashboardViewProps {
   isPlanStale: boolean;
   isGeneratingPlan: boolean;
   generationStage: string | null;
+  location?: LocationInfo;
+  onSelectLocation?: (location: LocationInfo) => void;
   onGeneratePlan: () => void;
   onGoToOptimize: () => void;
 }
@@ -34,6 +39,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   isPlanStale,
   isGeneratingPlan,
   generationStage,
+  location,
+  onSelectLocation,
   onGeneratePlan,
   onGoToOptimize,
 }) => {
@@ -136,7 +143,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {location && onSelectLocation && (
+            <LocationPicker
+              currentLocation={location}
+              onSelectLocation={onSelectLocation}
+              variant="compact"
+            />
+          )}
+
           <button
             type="button"
             onClick={onGeneratePlan}
@@ -572,92 +587,163 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* BEFORE VS AFTER: Compact Visual Comparison Cards */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-            Before vs. After Impact Comparison
-          </h2>
-          <span className="text-xs text-slate-500">Same simulation day comparison</span>
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                Before vs. After Impact Comparison
+              </h2>
+              {isPlanStale ? (
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full">
+                  Updates Pending
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-full">
+                  Live Optimized
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Side-by-side simulation comparing your normal routine vs. SolarFlow optimized load shifting.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 font-mono hidden sm:inline">Same simulation day</span>
+            {isPlanStale && (
+              <button
+                type="button"
+                onClick={onGeneratePlan}
+                disabled={isGeneratingPlan}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
+                <span>Sync</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Card A: Solar Self-Consumption */}
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/70 space-y-2">
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/70 space-y-3">
             <div className="flex justify-between items-center text-xs font-semibold text-slate-700">
-              <span>Solar Self-Consumption</span>
-              <span className="text-emerald-700 font-bold font-mono">
-                +{impact.selfConsumptionGainPctPoints}% improvement
+              <span className="flex items-center gap-1.5">
+                <Sun className="w-4 h-4 text-amber-500" />
+                <span>Solar Self-Consumption</span>
               </span>
+              {impact.selfConsumptionGainPctPoints > 0 ? (
+                <span className="text-emerald-700 font-bold font-mono bg-emerald-100 border border-emerald-300/80 px-2 py-0.5 rounded-full text-[11px]">
+                  +{impact.selfConsumptionGainPctPoints}% improvement
+                </span>
+              ) : (
+                <span className="text-slate-500 font-medium font-mono bg-slate-200/80 px-2 py-0.5 rounded-full text-[11px]">
+                  Optimal alignment
+                </span>
+              )}
             </div>
 
-            <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex justify-between text-slate-500">
-                <span>Before (Normal):</span>
-                <span>{impact.normalSelfConsumptionPct}%</span>
-              </div>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-slate-500 h-2 rounded-full"
-                  style={{ width: `${Math.min(100, impact.normalSelfConsumptionPct)}%` }}
-                />
+            <div className="space-y-2 text-xs font-mono">
+              <div>
+                <div className="flex justify-between text-slate-500 mb-1">
+                  <span>Before (Normal schedule):</span>
+                  <span className="font-bold text-slate-700">{impact.normalSelfConsumptionPct}%</span>
+                </div>
+                <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-slate-400 h-2.5 rounded-full transition-all duration-500 ease-in-out"
+                    style={{ width: `${Math.min(100, Math.max(2, impact.normalSelfConsumptionPct))}%` }}
+                  />
+                </div>
               </div>
 
-              <div className="flex justify-between text-emerald-700 font-bold pt-1">
-                <span>After (Optimized):</span>
-                <span>{impact.optimizedSelfConsumptionPct}%</span>
+              <div>
+                <div className="flex justify-between text-emerald-800 font-bold mb-1">
+                  <span>After (Optimized schedule):</span>
+                  <span className="text-emerald-700 font-extrabold">{impact.optimizedSelfConsumptionPct}%</span>
+                </div>
+                <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-emerald-600 h-2.5 rounded-full transition-all duration-500 ease-in-out"
+                    style={{ width: `${Math.min(100, Math.max(2, impact.optimizedSelfConsumptionPct))}%` }}
+                  />
+                </div>
               </div>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-emerald-600 h-2 rounded-full"
-                  style={{ width: `${Math.min(100, impact.optimizedSelfConsumptionPct)}%` }}
-                />
+
+              <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
+                <span>Direct solar used:</span>
+                <span className="font-semibold text-slate-700">
+                  {impact.normalSolarUsedDirectlyKWh} kWh &rarr; <strong className="text-emerald-700">{impact.optimizedSolarUsedDirectlyKWh} kWh</strong>
+                </span>
               </div>
             </div>
           </div>
 
           {/* Card B: Grid Energy Import */}
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/70 space-y-2">
-            <div className="flex justify-between items-center text-xs font-semibold text-slate-700">
-              <span>Grid Electricity Import</span>
-              <span className="text-emerald-700 font-bold font-mono">
-                -{impact.gridReductionKWh} kWh avoided
-              </span>
-            </div>
+          {(() => {
+            const maxGridRef = Math.max(impact.normalGridImportKWh, impact.optimizedGridImportKWh, 0.1);
+            const normalBarPct = Math.round((impact.normalGridImportKWh / maxGridRef) * 100);
+            const optBarPct = Math.round((impact.optimizedGridImportKWh / maxGridRef) * 100);
 
-            <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex justify-between text-slate-500">
-                <span>Before (Normal):</span>
-                <span>{impact.normalGridImportKWh} kWh</span>
-              </div>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-rose-400 h-2 rounded-full"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      (impact.normalGridImportKWh / Math.max(0.1, impact.normalGridImportKWh + 2)) * 100
-                    )}%`,
-                  }}
-                />
-              </div>
+            return (
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/70 space-y-3">
+                <div className="flex justify-between items-center text-xs font-semibold text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <ArrowDownRight className="w-4 h-4 text-rose-500" />
+                    <span>Grid Electricity Import</span>
+                  </span>
+                  {impact.gridReductionKWh > 0 ? (
+                    <span className="text-emerald-700 font-bold font-mono bg-emerald-100 border border-emerald-300/80 px-2 py-0.5 rounded-full text-[11px]">
+                      -{impact.gridReductionKWh} kWh avoided
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 font-medium font-mono bg-slate-200/80 px-2 py-0.5 rounded-full text-[11px]">
+                      Baseline maintained
+                    </span>
+                  )}
+                </div>
 
-              <div className="flex justify-between text-emerald-700 font-bold pt-1">
-                <span>After (Optimized):</span>
-                <span>{impact.optimizedGridImportKWh} kWh</span>
+                <div className="space-y-2 text-xs font-mono">
+                  <div>
+                    <div className="flex justify-between text-slate-500 mb-1">
+                      <span>Before (Normal schedule):</span>
+                      <span className="font-bold text-rose-700">{impact.normalGridImportKWh} kWh</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-rose-400 h-2.5 rounded-full transition-all duration-500 ease-in-out"
+                        style={{ width: `${Math.min(100, Math.max(2, normalBarPct))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-emerald-800 font-bold mb-1">
+                      <span>After (Optimized schedule):</span>
+                      <span className="text-emerald-700 font-extrabold">{impact.optimizedGridImportKWh} kWh</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-emerald-600 h-2.5 rounded-full transition-all duration-500 ease-in-out"
+                        style={{ width: `${Math.min(100, Math.max(2, optBarPct))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Grid reduction:</span>
+                    <span className="font-semibold text-slate-700">
+                      {impact.gridReductionPct > 0 ? (
+                        <strong className="text-emerald-700">-{impact.gridReductionPct}% cut</strong>
+                      ) : (
+                        <span>0%</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-emerald-600 h-2 rounded-full"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      (impact.optimizedGridImportKWh / Math.max(0.1, impact.normalGridImportKWh + 2)) * 100
-                    )}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
 
         {/* Secondary metric footnote */}
