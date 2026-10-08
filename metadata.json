@@ -1,0 +1,6 @@
+{
+  "name": "Predictive Solar Energy Optimizer",
+  "description": "Predictive solar energy optimization for grid-connected households. Intelligently schedules flexible appliances to maximize rooftop solar self-consumption and minimize grid import.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
