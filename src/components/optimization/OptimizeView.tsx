@@ -91,14 +91,12 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({
   const solarWinStart = forecast.usefulSolarWindow.startHour;
   const solarWinEnd = forecast.usefulSolarWindow.endHour;
 
-  // Dynamic timeline span: show daylight & operating span (hours 5 to 23)
-  const timelineStart = 5;
-  const timelineEnd = 23;
-  const timelineTotalHours = timelineEnd - timelineStart;
+  // Dynamic 24-hour timeline horizon
+  const TIMELINE_AXIS_HOURS = [0, 4, 8, 12, 16, 20, 24];
 
   const getTimelineLeftPercent = (hour: number) => {
-    const clamped = Math.max(timelineStart, Math.min(timelineEnd, hour));
-    return ((clamped - timelineStart) / timelineTotalHours) * 100;
+    const clamped = Math.max(0, Math.min(24, hour));
+    return (clamped / 24) * 100;
   };
 
   const solarWindowStartPct = getTimelineLeftPercent(solarWinStart);
@@ -114,10 +112,10 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({
             <AlertCircle className="w-5 h-5 text-amber-700 shrink-0" />
             <div>
               <h4 className="text-xs font-bold text-amber-900">
-                Plan needs to be regenerated
+                Plan needs regeneration
               </h4>
               <p className="text-[11px] text-amber-800/90">
-                Parameters have changed. Regenerate to see updated schedule recommendations.
+                Your household or appliance settings have changed. Generate a new plan to update the optimization results.
               </p>
             </div>
           </div>
@@ -129,7 +127,7 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-xs cursor-pointer self-start sm:self-auto shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
-              <span>Regenerate Plan</span>
+              <span>{isGeneratingPlan ? 'Optimizing...' : "Generate Tomorrow's Plan"}</span>
             </button>
           )}
         </div>
@@ -329,15 +327,11 @@ export const OptimizeView: React.FC<OptimizeViewProps> = ({
             </div>
           </div>
 
-          {/* Time Labels */}
+          {/* Dynamic 24-Hour Horizon Time Labels */}
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-2">
-            <span>5 AM</span>
-            <span>8 AM</span>
-            <span>11 AM</span>
-            <span>2 PM</span>
-            <span>5 PM</span>
-            <span>8 PM</span>
-            <span>11 PM</span>
+            {TIMELINE_AXIS_HOURS.map((h) => (
+              <span key={h}>{h < 10 ? `0${h}:00` : `${h}:00`}</span>
+            ))}
           </div>
 
           {/* Branched Appliance Nodes */}

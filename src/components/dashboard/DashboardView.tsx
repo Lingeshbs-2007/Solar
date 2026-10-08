@@ -98,10 +98,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div>
               <h4 className="text-xs font-bold text-amber-900">
-                Household or appliance inputs were modified
+                Plan needs regeneration
               </h4>
               <p className="text-[11px] text-amber-800/90">
-                The current plan does not reflect your latest parameters. Regenerate tomorrow&apos;s plan to update recommendations.
+                Your household or appliance settings have changed. Generate a new plan to update the optimization results.
               </p>
             </div>
           </div>
@@ -112,7 +112,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-xs cursor-pointer self-start sm:self-auto shrink-0"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
-            <span>{isGeneratingPlan ? generationStage || 'Calculating...' : 'Regenerate Plan'}</span>
+            <span>{isGeneratingPlan ? generationStage || 'Calculating...' : "Generate Tomorrow's Plan"}</span>
           </button>
         </div>
       )}

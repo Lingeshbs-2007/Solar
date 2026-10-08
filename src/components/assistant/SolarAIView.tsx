@@ -22,12 +22,46 @@ interface SolarAIViewProps {
   household: HouseholdConfig;
 }
 
+const renderFormattedText = (text: string) => {
+  return text.split('\n').map((line, lineIdx) => {
+    const isBullet = line.trim().startsWith('* ') || line.trim().startsWith('• ') || line.trim().startsWith('- ');
+    const cleanLine = isBullet ? line.trim().replace(/^[*•-]\s+/, '') : line;
+    const parts = cleanLine.split(/(\*\*[^*]+\*\*)/g);
+
+    const renderedLine = parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return (
+          <strong key={i} className="font-semibold text-slate-900">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return part;
+    });
+
+    if (isBullet) {
+      return (
+        <div key={lineIdx} className="flex items-start gap-2 my-1">
+          <span className="text-emerald-600 font-bold shrink-0">•</span>
+          <span>{renderedLine}</span>
+        </div>
+      );
+    }
+
+    return (
+      <p key={lineIdx} className={line.trim() === '' ? 'h-2' : 'my-1'}>
+        {renderedLine}
+      </p>
+    );
+  });
+};
+
 export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'assistant',
-      text: `Hello! I am your SolarFlow energy advisor. I have direct access to your ${household.location.name} rooftop array data (${household.panelCapacityKW} kW) and tomorrow's optimized appliance plan. How can I help you today?`,
+      text: `Hello! I am your Solar Energy & Photovoltaics Expert AI. You can ask me ANY question about solar panels, photovoltaic technology, monocrystalline vs polycrystalline, inverters, battery storage, cleaning and maintenance, lifespan, net metering, or how rooftop solar works. What would you like to know?`,
       timestamp: 'Just now',
     },
   ]);
@@ -45,12 +79,13 @@ export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) =
       timestamp: 'Just now',
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
     setInputQuestion('');
     setIsAsking(true);
 
     try {
-      const answer = await askSolarAssistant(q, impact, household);
+      const answer = await askSolarAssistant(q, impact, household, newMessages);
       const botMsg: ChatMessage = {
         id: `assistant-${Date.now()}`,
         sender: 'assistant',
@@ -77,17 +112,17 @@ export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) =
       <div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
           <Bot className="w-7 h-7 text-emerald-600" />
-          Solar AI
+          Solar AI Assistant
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-          Ask about your solar generation, energy plan or tomorrow&apos;s recommendations.
+          General solar energy knowledge consultant — ask any question about solar panels, inverters, PV physics, cleaning, or technology.
         </p>
       </div>
 
       {/* Suggested Questions Grid */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs space-y-2">
         <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-          Suggested Questions
+          Frequently Asked Solar Questions
         </span>
         <div className="flex flex-wrap gap-2">
           {SUGGESTED_QUESTIONS.map((q) => (
@@ -131,7 +166,7 @@ export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) =
                     : 'bg-slate-50 text-slate-800 border border-slate-200/80'
                 }`}
               >
-                {msg.text}
+                {renderFormattedText(msg.text)}
               </div>
             </div>
           ))}
@@ -142,7 +177,7 @@ export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) =
                 <Bot className="w-4 h-4 animate-spin" />
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2 text-xs text-slate-500">
-                Reviewing solar forecast and schedule...
+                Consulting solar energy knowledge base...
               </div>
             </div>
           )}
@@ -160,7 +195,7 @@ export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) =
             type="text"
             value={inputQuestion}
             onChange={(e) => setInputQuestion(e.target.value)}
-            placeholder="Ask about tomorrow's plan, appliance shifts, or solar output..."
+            placeholder="Ask any question about solar panels, inverters, battery storage, cleaning, degradation..."
             disabled={isAsking}
             className="flex-1 bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:bg-white transition-colors"
           />
@@ -178,7 +213,7 @@ export const SolarAIView: React.FC<SolarAIViewProps> = ({ impact, household }) =
 
       <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400">
         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-        <span>Answers are strictly grounded in your deterministic optimizer calculations.</span>
+        <span>Broad Solar Knowledge Expert • Answers questions on any PV hardware, physics, or installation topic</span>
       </div>
     </div>
   );

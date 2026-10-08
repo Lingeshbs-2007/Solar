@@ -29,6 +29,30 @@ if (apiKey) {
   });
 }
 
+const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+
+async function generateWithFallback(options: {
+  contents: any;
+  config?: any;
+}) {
+  if (!aiClient) throw new Error('Gemini API client not configured with GEMINI_API_KEY');
+  let lastError: any = null;
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const response = await aiClient.models.generateContent({
+        model,
+        contents: options.contents,
+        config: options.config,
+      });
+      return response;
+    } catch (err: any) {
+      console.warn(`Model ${model} unavailable: ${err.message}. Trying next candidate model...`);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('All Gemini candidate models failed');
+}
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -87,8 +111,7 @@ APPLIANCE DECISIONS:
 ${JSON.stringify(decisions, null, 2)}
 `;
 
-    const response = await aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await generateWithFallback({
       contents: promptText,
       config: {
         systemInstruction:
@@ -138,9 +161,9 @@ ${JSON.stringify(decisions, null, 2)}
 // Dedicated Solar AI Assistant endpoint
 app.post('/api/assistant', async (req, res) => {
   try {
-    const { question, context } = req.body;
+    const { question, context, history } = req.body;
 
-    if (!question) {
+    if (!question || typeof question !== 'string') {
       return res.status(400).json({ error: 'Missing question' });
     }
 
@@ -150,27 +173,28 @@ app.post('/api/assistant', async (req, res) => {
       });
     }
 
-    const systemPrompt = `
-You are the dedicated SolarFlow AI Energy Advisor for a rooftop solar-powered home.
-You assist the homeowner by answering questions specifically about:
-- Tomorrow's solar generation forecast and confidence
-- The recommended appliance schedule and why specific appliances were shifted
-- Rooftop solar self-consumption vs grid export/import
-- Household energy optimization strategies
+    const systemPrompt = `You are a concise, knowledgeable Solar Energy & Photovoltaics AI Consultant.
+Your mission is to answer ANY question related to solar panels, rooftop solar PV, equipment, maintenance, inverters, batteries, grid connection, efficiency, and green energy.
 
-Guidelines:
-1. Keep answers concise (2-4 short sentences or bullet points).
-2. Ground explanations strictly in the homeowner's data provided below.
-3. Do NOT invent new numbers or change schedules.
-4. Tone: Clear, practical, authoritative yet approachable.
-
-CURRENT HOME DATA:
-${context ? JSON.stringify(context, null, 2) : 'No household context available.'}
+STRICT GUIDELINES:
+1. DIRECT & ACCURATE: Answer the specific question directly without unnecessary filler, repetitive preambles, or conversational fluff.
+2. NO REPETITION: Do NOT repeat previously stated points or regurgitate the same answers. Give fresh, specific details tailored to what was asked.
+3. CONCISE LENGTH: Keep responses to 2–4 informative sentences or 3–4 punchy bullet points. Avoid walls of text.
+4. GENERAL SOLAR FOCUS: Cover general solar industry knowledge (photovoltaic physics, monocrystalline vs polycrystalline vs TOPCon, bifacial panels, string inverters vs microinverters, battery storage, cleaning techniques, temperature degradation, tilt angles, net metering, ROI).
+5. HOUSEHOLD CONTEXT: Do NOT mention specific household demand numbers or scheduled appliances UNLESS the user explicitly asks about their personal schedule or their home.
 `;
 
-    const response = await aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: question,
+    // Construct prompt with optional recent conversation turns
+    let contents = '';
+    if (Array.isArray(history) && history.length > 0) {
+      const recentHistory = history.slice(-4).map((h: any) => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text}`).join('\n');
+      contents = `Recent conversation:\n${recentHistory}\n\nUser: ${question}\nAssistant:`;
+    } else {
+      contents = question;
+    }
+
+    const response = await generateWithFallback({
+      contents,
       config: {
         systemInstruction: systemPrompt,
       },

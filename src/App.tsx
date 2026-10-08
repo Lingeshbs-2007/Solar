@@ -10,6 +10,11 @@ import { ImpactSummary } from './models/impact';
 import { getSolarForecastForHousehold } from './services/weather';
 import { calculateImpactSummary } from './engines/impactCalculator';
 import { AIExplanationResult, getAIOptimizationExplanation } from './services/aiRecommendation';
+import {
+  getHouseholdSignature,
+  getAppliancesSignature,
+  StoredOptimizationPlan,
+} from './utils/signatures';
 
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -26,11 +31,16 @@ const STORAGE_KEY_APPLIANCES = 'solarflow_appliances_v1';
 const STORAGE_KEY_PLAN = 'solarflow_plan_v1';
 
 export default function App() {
-  // Single Source of Truth for Household & Appliances with localStorage restoration
+  // Single Source of Truth for Household & Appliances with safe localStorage restoration
   const [household, setHouseholdState] = useState<HouseholdConfig>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_HOUSEHOLD);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.location && typeof parsed.panelCapacityKW === 'number') {
+          return parsed;
+        }
+      }
     } catch (e) {
       console.warn('Failed restoring household from storage:', e);
     }
@@ -40,7 +50,12 @@ export default function App() {
   const [appliances, setAppliancesState] = useState<Appliance[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_APPLIANCES);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch (e) {
       console.warn('Failed restoring appliances from storage:', e);
     }
@@ -71,6 +86,7 @@ export default function App() {
   const handleUpdateHousehold = useCallback((updated: HouseholdConfig) => {
     setHouseholdState(updated);
     setIsPlanStale(true);
+    setAiExplanation(null);
     try {
       localStorage.setItem(STORAGE_KEY_HOUSEHOLD, JSON.stringify(updated));
     } catch (e) {
@@ -82,6 +98,7 @@ export default function App() {
   const handleUpdateAppliances = useCallback((updated: Appliance[]) => {
     setAppliancesState(updated);
     setIsPlanStale(true);
+    setAiExplanation(null);
     try {
       localStorage.setItem(STORAGE_KEY_APPLIANCES, JSON.stringify(updated));
     } catch (e) {
@@ -98,8 +115,8 @@ export default function App() {
       setIsGeneratingPlan(true);
 
       try {
-        // Stage 1: Fetching forecast
-        setGenerationStage('Stage 1/5: Querying weather & solar forecast...');
+        // Stage 1: Fetching solar forecast
+        setGenerationStage('1. Fetching solar forecast...');
         await new Promise((r) => setTimeout(r, 220));
         const newForecast = await getSolarForecastForHousehold(
           targetHousehold.location,
@@ -107,33 +124,40 @@ export default function App() {
         );
         setForecast(newForecast);
 
-        // Stage 2: Estimating demand
-        setGenerationStage('Stage 2/5: Estimating 24-hour demand profile...');
+        // Stage 2: Estimating household demand
+        setGenerationStage('2. Estimating household demand...');
         await new Promise((r) => setTimeout(r, 180));
 
-        // Stage 3: Finding solar mismatch & greedy optimization
-        setGenerationStage('Stage 3/5: Running constraint-aware optimizer...');
+        // Stage 3: Analyzing solar-demand balance
+        setGenerationStage('3. Analyzing solar-demand balance...');
+        await new Promise((r) => setTimeout(r, 180));
+
+        // Stage 4: Optimizing flexible appliance schedules
+        setGenerationStage('4. Optimizing flexible appliance schedules...');
         await new Promise((r) => setTimeout(r, 200));
 
-        // Stage 4: Calculating impact
-        setGenerationStage('Stage 4/5: Calculating schedule impact & self-consumption...');
+        // Stage 5: Calculating expected impact
+        setGenerationStage('5. Calculating expected impact...');
         await new Promise((r) => setTimeout(r, 160));
         const newImpact = calculateImpactSummary(targetAppliances, newForecast, targetHousehold);
         setImpactSummary(newImpact);
 
-        // Stage 5: Plan ready
-        setGenerationStage('Stage 5/5: Plan ready!');
+        // Stage 6: Preparing recommendation
+        setGenerationStage('6. Preparing recommendation...');
         await new Promise((r) => setTimeout(r, 150));
 
         setIsPlanStale(false);
 
-        // Persist generated plan
+        // Persist generated plan with deterministic signatures
         try {
-          localStorage.setItem(STORAGE_KEY_PLAN, JSON.stringify({
+          const planRecord: StoredOptimizationPlan = {
+            householdSignature: getHouseholdSignature(targetHousehold),
+            applianceSignature: getAppliancesSignature(targetAppliances),
             forecast: newForecast,
             impact: newImpact,
-            timestamp: Date.now(),
-          }));
+            generatedAt: Date.now(),
+          };
+          localStorage.setItem(STORAGE_KEY_PLAN, JSON.stringify(planRecord));
         } catch (e) {
           console.warn('Storage plan save failed:', e);
         }
@@ -154,7 +178,7 @@ export default function App() {
     [household, appliances]
   );
 
-  // On mount: restore previous valid plan or generate plan
+  // On mount: restore previous plan with signature validation, or generate plan
   useEffect(() => {
     if (!isFirstMount.current) return;
     isFirstMount.current = false;
@@ -162,28 +186,46 @@ export default function App() {
     try {
       const savedPlanStr = localStorage.getItem(STORAGE_KEY_PLAN);
       if (savedPlanStr) {
-        const parsed = JSON.parse(savedPlanStr);
-        if (parsed.forecast && parsed.impact) {
+        const parsed: StoredOptimizationPlan = JSON.parse(savedPlanStr);
+        if (parsed && parsed.forecast && parsed.impact) {
+          const curHSig = getHouseholdSignature(household);
+          const curASig = getAppliancesSignature(appliances);
+
+          // Plan is valid ONLY if both current signatures match the saved signatures
+          const isSignatureMatch =
+            parsed.householdSignature === curHSig &&
+            parsed.applianceSignature === curASig;
+
           setForecast(parsed.forecast);
           setImpactSummary(parsed.impact);
-          setIsPlanStale(false);
 
-          // Get initial AI explanation
-          setIsAiLoading(true);
-          getAIOptimizationExplanation(parsed.impact)
-            .then((res) => setAiExplanation(res))
-            .catch(() => {})
-            .finally(() => setIsAiLoading(false));
-          return;
+          if (isSignatureMatch) {
+            setIsPlanStale(false);
+            // Request AI explanation for validated plan
+            setIsAiLoading(true);
+            getAIOptimizationExplanation(parsed.impact)
+              .then((res) => setAiExplanation(res))
+              .catch(() => {})
+              .finally(() => setIsAiLoading(false));
+            return;
+          } else {
+            // Signatures differ: household or appliance configuration changed while offline!
+            setIsPlanStale(true);
+            setAiExplanation(null);
+            return;
+          }
         }
       }
     } catch (e) {
-      console.warn('Could not restore saved plan:', e);
+      console.warn('Could not restore saved plan safely, resetting:', e);
+      try {
+        localStorage.removeItem(STORAGE_KEY_PLAN);
+      } catch {}
     }
 
-    // Generate initial plan if none saved
+    // Generate initial plan if none saved or storage corrupted
     handleGeneratePlan();
-  }, [handleGeneratePlan]);
+  }, [handleGeneratePlan, household, appliances]);
 
   // Handler: Load Standard Demo Household
   const handleLoadDemoHousehold = useCallback(() => {
@@ -204,6 +246,8 @@ export default function App() {
 
     setHouseholdState(demoH);
     setAppliancesState(DEMO_APPLIANCES);
+    setIsPlanStale(true);
+    setAiExplanation(null);
 
     try {
       localStorage.setItem(STORAGE_KEY_HOUSEHOLD, JSON.stringify(demoH));
